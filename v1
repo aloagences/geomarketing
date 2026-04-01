@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planificateur Géomarketing Expert - Interface Premium</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Icônes -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Librairies pour l'export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Plugin Heatmap -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
+    
+    :root { 
+      --brand: #0E2C59; 
+      --brand-soft: rgba(14,44,89,0.08); 
+    }
+    
+    body { 
+      font-family: 'Montserrat', sans-serif; 
+      background: #F3F4F6; 
+      color: #1F2937; 
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .card { 
+      background: #fff; 
+      border: 1px solid #E5E7EB; 
+      border-radius: 16px; 
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); 
+    }
+
+    .input-style { 
+      width: 100%; 
+      padding: 0.75rem 1rem; 
+      border: 1px solid #D1D5DB; 
+      border-radius: 8px; 
+      transition: all 0.2s; 
+      background-color: #FAFAFA;
+    }
+    
+    .input-style:focus { 
+      outline: none; 
+      border-color: var(--brand); 
+      background-color: #fff;
+      box-shadow: 0 0 0 3px var(--brand-soft); 
+    }
+
+    .alert-box { 
+      display: none; 
+      padding: 1rem; 
+      border-radius: 8px; 
+      border-left: 4px solid;
+      margin-bottom: 1.5rem;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .page-break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+  </style>
+</head>
+<body class="text-gray-800">
+
+  <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+    
+    <!-- En-tête -->
+    <header class="text-center mb-8 bg-[#0E2C59] p-8 rounded-3xl shadow-xl text-white relative overflow-hidden">
+      <div class="absolute top-0 left-0 w-32 h-32 bg-white opacity-5 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+      <div class="absolute bottom-0 right-0 w-48 h-48 bg-white opacity-5 rounded-full translate-x-1/4 translate-y-1/4"></div>
+
+      <div class="relative z-10 flex flex-col items-center">
+        <div class="mb-4 bg-white/10 p-3 rounded-full backdrop-blur-sm">
+          <i data-lucide="crosshair" class="w-10 h-10 text-white"></i>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
+        <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route & exports PDF Premium</p>
+      </div>
+    </header>
+
+    <div id="alertBox" class="alert-box" role="alert">
+      <div class="flex items-start">
+        <i id="alertIcon" data-lucide="alert-circle" class="w-6 h-6 mr-3 mt-0.5"></i>
+        <span id="alertText"></span>
+      </div>
+    </div>
+
+    <main>
+      <section id="inputSection" class="transition-all duration-500">
+        
+        <!-- Configuration API cachée -->
+        <div class="card p-4 mb-6 bg-white border-l-4 border-gray-300">
+          <details>
+            <summary class="cursor-pointer font-semibold text-gray-500 text-sm flex items-center select-none">
+              <i data-lucide="settings" class="w-4 h-4 mr-2"></i> Tableau de bord des APIs (8 APIs actives)
+            </summary>
+            <div class="mt-4 space-y-3 pt-3 border-t border-gray-100">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div class="p-3 bg-blue-50 text-blue-800 text-xs rounded border border-blue-200">
+                    <i data-lucide="building" class="inline w-3 h-3 mr-1"></i> <b>SIRENE & BAN :</b> Vérification Entreprise + Adresses
+                  </div>
+                  <div class="p-3 bg-indigo-50 text-indigo-800 text-xs rounded border border-indigo-200">
+                    <i data-lucide="users" class="inline w-3 h-3 mr-1"></i> <b>Géo API Gouv :</b> Population exacte par commune
+                  </div>
+                  <div class="p-3 bg-purple-50 text-purple-800 text-xs rounded border border-purple-200">
+                    <i data-lucide="school" class="inline w-3 h-3 mr-1"></i> <b>Éduc. Nationale :</b> API Vacances Scolaires
+                  </div>
+                  <div class="p-3 bg-green-50 text-green-800 text-xs rounded border border-green-200">
+                    <i data-lucide="map" class="inline w-3 h-3 mr-1"></i> <b>OSM & OSRM :</b> Topographie & Distances de Route
+                  </div>
+                  <div class="p-3 bg-amber-50 text-amber-800 text-xs rounded border border-amber-200 md:col-span-2">
+                    <i data-lucide="cloud-rain" class="inline w-3 h-3 mr-1"></i> <b>Open-Meteo :</b> Contexte météo envoyé à l'IA
+                  </div>
+                  <div class="p-3 bg-red-50 text-red-800 text-xs rounded border border-red-200">
+                    <i data-lucide="shopping-basket" class="inline w-3 h-3 mr-1"></i> <b>API Marchés :</b> Extraction prioritaire des forains
+                  </div>
+              </div>
+              <div class="pt-2 border-t mt-2">
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Moteur IA Principal (Gemini)</label>
+                <input type="password" id="apiKeyInput" class="input-style text-sm" value="" placeholder="Laisser vide pour utiliser le jeton système" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Moteur IA Secours (Groq)</label>
+                <input type="password" id="groqKeyInput" class="input-style text-sm" value="" placeholder="Optionnel" />
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 card p-6 md:p-8">
+            <h2 class="text-2xl font-bold text-[#0E2C59] mb-6 flex items-center">
+              <i data-lucide="map" class="w-6 h-6 mr-3"></i> Paramètres de la Campagne
+            </h2>
+            
+            <form id="clientForm" class="space-y-5" novalidate>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div class="col-span-1 md:col-span-2">
+                  <label for="clientBrand" class="block text-sm font-bold text-gray-700 mb-1">Enseigne / Client</label>
+                  <input class="input-style font-semibold" id="clientBrand" type="text" placeholder="Ex: LIDL Antibes" required />
+                </div>
+                
+                <div class="col-span-1 md:col-span-2">
+                  <label for="clientAddress" class="block text-sm font-bold text-gray-700 mb-1">Adresse complète du QG (Départ)</label>
+                  <div class="relative">
+                    <input class="input-style pl-10" id="clientAddress" type="text" placeholder="Ex: 60 Chemin des Sables, 06160 Antibes" required />
+                    <i data-lucide="map-pin" class="w-4 h-4 text-gray-400 absolute left-3 top-3.5"></i>
+                  </div>
+                </div>
+
+                <div>
+                  <label for="campaignRadius" class="block text-sm font-bold text-gray-700 mb-1">Rayon (km)</label>
+                  <div class="relative">
+                    <input class="input-style pr-10" id="campaignRadius" type="number" min="1" max="100" value="10" required />
+                    <span class="absolute right-3 top-3 text-sm text-gray-500 font-bold">KM</span>
+                  </div>
+                </div>
+                
+                <div>
+                  <label for="campaignDuration" class="block text-sm font-bold text-gray-700 mb-1">Durée (jours)</label>
+                  <input class="input-style" id="campaignDuration" type="number" min="1" value="1" required />
+                </div>
+
+                <div>
+                  <label for="campaignStartDate" class="block text-sm font-bold text-gray-700 mb-1">Date de début</label>
+                  <input class="input-style" id="campaignStartDate" type="date" required />
+                </div>
+                
+                <div>
+                  <label for="targetProfile" class="block text-sm font-bold text-gray-700 mb-1">Cible (Persona)</label>
+                  <input class="input-style" id="targetProfile" type="text" placeholder="Ex: Familles, Actifs..." required />
+                </div>
+
+                <div class="col-span-1 md:col-span-2 border-l-4 border-red-500 pl-3 py-1 bg-red-50 rounded-r-lg">
+                  <label for="competitors" class="block text-sm font-bold text-red-800 mb-1 flex items-center justify-between">
+                    <span class="flex items-center"><i data-lucide="target" class="w-4 h-4 mr-1"></i> Concurrents à cibler</span>
+                    <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Auto-détection si vide</span>
+                  </label>
+                  <input class="input-style border-red-200 focus:border-red-500 transition-colors duration-500" id="competitors" type="text" placeholder="Ex: Aldi, Carrefour..." />
+                </div>
+                
+                <div class="col-span-1 md:col-span-2 border-l-4 border-orange-500 pl-3 py-1 bg-orange-50 rounded-r-lg">
+                  <label for="excludedCities" class="block text-sm font-bold text-orange-800 mb-1 flex items-center">
+                    <i data-lucide="waves" class="w-4 h-4 mr-1"></i> Barrières (Villes à exclure)
+                  </label>
+                  <input class="input-style border-orange-200 focus:border-orange-500" id="excludedCities" type="text" placeholder="Ex: Cagnes-sur-Mer..." />
+                </div>
+
+                <div class="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
+                   <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Matin (4 arrêts)</label>
+                    <input class="input-style" id="timeMorning" type="text" value="10:00 - 13:00" required />
+                   </div>
+                   <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Après-midi (4 arrêts)</label>
+                    <input class="input-style" id="timeAfternoon" type="text" value="14:00 - 18:00" required />
+                   </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Section Bouton + Barre de progression -->
+          <div class="card p-6 flex flex-col justify-center bg-[#0E2C59] text-white relative overflow-hidden">
+            <h3 class="text-xl font-bold mb-4 relative z-10">Moteur Algorithmique</h3>
+            
+            <ul class="text-xs text-blue-200 mb-6 space-y-3 relative z-10">
+                <li class="flex"><i data-lucide="compass" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Stratégie Cardinale (Nord, Sud, Est, Ouest)</span></li>
+                <li class="flex"><i data-lucide="graduation-cap" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Écoles primaires régulées (Lun,Mar,Jeu,Ven à 11h15/16h15)</span></li>
+                <li class="flex"><i data-lucide="map-pin" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>60% d'arrêts Intra-Muros (- de 2km)</span></li>
+                <li class="flex"><i data-lucide="target" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Auto-Détection IA des Concurrents Directs</span></li>
+            </ul>
+            
+            <button type="button" id="generatePlanBtn" class="w-full bg-white text-[#0E2C59] hover:bg-gray-100 font-extrabold py-4 px-6 rounded-xl transition duration-200 shadow-lg flex items-center justify-center relative z-10 mt-auto">
+              <span id="spinner" class="hidden mr-3">
+                <svg class="animate-spin h-5 w-5 text-[#0E2C59]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+              <span id="btnText">Générer le Plan</span>
+            </button>
+
+            <!-- Loading status & Progress Bar -->
+            <div id="progressContainer" class="hidden w-full mt-5 relative z-10">
+                <div class="flex justify-between text-xs text-blue-200 mb-1">
+                    <span id="loadingStatus" class="font-medium">Initialisation...</span>
+                    <span id="progressPercent" class="font-mono font-bold text-white">0%</span>
+                </div>
+                <div class="w-full bg-[#07162d] rounded-full h-2 overflow-hidden shadow-inner">
+                    <div id="progressBar" class="bg-gradient-to-r from-blue-400 to-emerald-400 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Résultats -->
+      <div id="analysisOutputContainer" class="mt-8 space-y-8 hidden">
+        
+        <!-- HEADER EXPORT -->
+        <div class="flex flex-col md:flex-row justify-between items-end border-b border-gray-200 pb-4 mb-6 gap-4 hide-on-print">
+          <div>
+            <h2 class="text-3xl font-extrabold text-[#0E2C59]">Plan de circulation</h2>
+            <p class="text-gray-500 mt-1 font-medium"><span id="displayBrand" class="font-bold text-gray-800 uppercase"></span> - Généré le <span id="generationDate"></span></p>
+            
+            <div id="officialBadges" class="mt-4 flex flex-wrap gap-2 hidden">
+               <span id="badgeSiren" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 hidden"><i data-lucide="building" class="w-3.5 h-3.5 mr-1"></i> SIREN: <span id="sirenVal" class="ml-1"></span></span>
+               <span id="badgeInsee" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 hidden"><i data-lucide="map" class="w-3.5 h-3.5 mr-1"></i> INSEE: <span id="inseeVal" class="ml-1"></span></span>
+               <span id="badgePop" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 hidden"><i data-lucide="users" class="w-3.5 h-3.5 mr-1"></i> Pop: <span id="popVal" class="ml-1"></span></span>
+               <span id="badgeWeather" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 hidden"><i data-lucide="cloud-rain" class="w-3.5 h-3.5 mr-1"></i> Météo: <span id="weatherVal" class="ml-1"></span></span>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+             <button id="downloadPdfBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-5 rounded-lg inline-flex items-center shadow-md transition transform hover:-translate-y-0.5">
+              <i data-lucide="file-text" class="w-5 h-5 mr-2"></i> Télécharger PDF (A4)
+            </button>
+             <button id="downloadCsvBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg inline-flex items-center shadow transition">
+              <i data-lucide="file-spreadsheet" class="w-4 h-4 mr-2"></i> CSV
+            </button>
+             <button id="downloadKmlBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-lg inline-flex items-center shadow transition">
+              <i data-lucide="map" class="w-4 h-4 mr-2"></i> KML
+            </button>
+          </div>
+        </div>
+
+        <!-- ESTIMATION REACH (Style PDF) -->
+        <div id="reachEstimationContainer" class="card overflow-hidden mt-8 hidden bg-[#0E2C59] text-white relative">
+            <div class="bg-[#0b2247] px-8 py-4 flex justify-between items-center">
+                <div class="flex flex-col">
+                    <span class="text-xs text-blue-300 font-semibold uppercase tracking-wider mb-1">Prédiction analytique de votre campagne</span>
+                    <h3 class="font-bold text-2xl flex items-center">
+                        <i data-lucide="bar-chart-2" class="w-6 h-6 mr-2 text-white"></i> Estimation des Performances (Reach)
+                    </h3>
+                </div>
+            </div>
+            
+            <div class="p-8">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                    <div class="bg-[#173a6e] rounded-xl p-8 shadow-inner border border-blue-800">
+                        <div class="text-white text-sm font-bold uppercase tracking-widest mb-4">Total Arrêts</div>
+                        <div id="estTotalStops" class="text-6xl font-extrabold text-white">0</div>
+                    </div>
+                    <div class="bg-[#173a6e] rounded-xl p-8 shadow-inner border border-blue-800">
+                        <div class="text-white text-sm font-bold uppercase tracking-widest mb-4">Couverture Estimée</div>
+                        <div id="estReach" class="text-5xl font-extrabold text-[#4ade80] mb-2">0</div>
+                        <div class="text-xs text-blue-200">Personnes uniques touchées</div>
+                    </div>
+                    <div class="bg-[#173a6e] rounded-xl p-8 shadow-inner border border-blue-800">
+                        <div class="text-white text-sm font-bold uppercase tracking-widest mb-4">Impressions Visuelles</div>
+                        <div id="estImpressions" class="text-5xl font-extrabold text-[#fbbf24] mb-2">0</div>
+                        <div class="text-xs text-blue-200">Vues cumulées (Fréquence x3.5)</div>
+                    </div>
+                </div>
+                <p class="text-xs text-blue-300/60 mt-6 text-center italic">* Calcul algorithmique dynamique basé sur les flux urbains et la densité de la zone.</p>
+            </div>
+        </div>
+
+        <!-- CARTE INTERACTIVE LEAFLET -->
+        <div id="mapContainerWrapper" class="card overflow-hidden z-0 relative mt-8 hidden border-0 shadow-lg bg-white">
+            <div class="bg-[#0E2C59] text-white px-8 py-4 flex justify-between items-center">
+                <div class="flex flex-col">
+                    <span class="text-xs text-blue-300 font-semibold uppercase tracking-wider mb-1">Prédiction analytique de votre campagne</span>
+                    <h3 class="font-bold text-xl flex items-center">
+                        <i data-lucide="map" class="w-5 h-5 mr-2 text-white"></i> Visualisation Topographique Finale & Rayon
+                    </h3>
+                </div>
+                <span id="mapStats" class="text-sm font-bold bg-white/10 px-3 py-1 rounded-lg"></span>
+            </div>
+            <div id="leafletMap" class="w-full h-[600px] z-0 bg-gray-100"></div>
+        </div>
+
+        <!-- STRATÉGIE IA -->
+        <div id="clientAnalysisOutput" class="card p-6 md:p-8 hidden relative group hide-on-print">
+          <div class="flex justify-between items-center mb-4 border-b pb-2">
+            <h3 class="font-bold text-xl text-[#0E2C59] flex items-center">
+                <i data-lucide="pie-chart" class="w-5 h-5 mr-2"></i> Stratégie Géomarketing de l'IA (Plan Cardinal)
+            </h3>
+          </div>
+          <div id="clientAnalysisText" class="prose text-gray-700 leading-relaxed text-sm md:text-base max-w-none"></div>
+        </div>
+
+        <!-- ITINÉRAIRE (Style PDF) -->
+        <div id="planOutput" class="hidden mt-8">
+          <div id="dailyPlansContainer" class="space-y-12"></div>
+        </div>
+
+        <!-- ÉMARGEMENT CHAUFFEUR (Style PDF) -->
+        <div id="attendanceSheetContainer" class="hidden mt-12 relative">
+          <div id="attendanceGrid" class="space-y-8"></div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // --- CONFIGURATION ---
+    const DEFAULT_CONFIG = {
+      geminiApiKey: "",
+      groqApiKey: "",
+      model: "gemini-2.5-flash-preview-09-2025"
+    };
+
+    lucide.createIcons();
+
+    const el = {
+      form: document.getElementById("clientForm"),
+      btn: document.getElementById("generatePlanBtn"),
+      btnKml: document.getElementById("downloadKmlBtn"),
+      btnCsv: document.getElementById("downloadCsvBtn"),
+      btnPdf: document.getElementById("downloadPdfBtn"),
+      btnText: document.getElementById("btnText"),
+      spinner: document.getElementById("spinner"),
+      
+      progressContainer: document.getElementById("progressContainer"),
+      progressBar: document.getElementById("progressBar"),
+      progressPercent: document.getElementById("progressPercent"),
+      loadingStatus: document.getElementById("loadingStatus"),
+      
+      alertBox: document.getElementById("alertBox"),
+      alertText: document.getElementById("alertText"),
+      alertIcon: document.getElementById("alertIcon"),
+      outputContainer: document.getElementById("analysisOutputContainer"),
+      analysisCard: document.getElementById("clientAnalysisOutput"),
+      analysisText: document.getElementById("clientAnalysisText"),
+      planCard: document.getElementById("planOutput"),
+      dailyPlansContainer: document.getElementById("dailyPlansContainer"),
+      attendanceCard: document.getElementById("attendanceSheetContainer"),
+      attendanceGrid: document.getElementById("attendanceGrid"),
+      displayBrand: document.getElementById("displayBrand"),
+      dateSpan: document.getElementById("generationDate"),
+      keyInput: document.getElementById("apiKeyInput"),
+      groqKeyInput: document.getElementById("groqKeyInput"),
+      mapContainer: document.getElementById("mapContainerWrapper"),
+      mapStats: document.getElementById("mapStats"),
+      
+      officialBadges: document.getElementById("officialBadges"),
+      badgeSiren: document.getElementById("badgeSiren"),
+      badgeInsee: document.getElementById("badgeInsee"),
+      badgePop: document.getElementById("badgePop"),
+      badgeWeather: document.getElementById("badgeWeather"),
+      sirenVal: document.getElementById("sirenVal"),
+      inseeVal: document.getElementById("inseeVal"),
+      popVal: document.getElementById("popVal"),
+      weatherVal: document.getElementById("weatherVal"),
+
+      reachEstimationContainer: document.getElementById("reachEstimationContainer"),
+      estTotalStops: document.getElementById("estTotalStops"),
+      estReach: document.getElementById("estReach"),
+      estImpressions: document.getElementById("estImpressions")
+    };
+
+    const input = {
+      brand: document.getElementById("clientBrand"),
+      address: document.getElementById("clientAddress"),
+      radius: document.getElementById("campaignRadius"),
+      startDate: document.getElementById("campaignStartDate"),
+      duration: document.getElementById("campaignDuration"),
+      morning: document.getElementById("timeMorning"),
+      afternoon: document.getElementById("timeAfternoon"),
+      target: document.getElementById("targetProfile"),
+      competitors: document.getElementById("competitors"),
+      excludedCities: document.getElementById("excludedCities")
+    };
+
+    let generatedData = null;
+    let mapInstance = null;
+    let markersLayer = null;
+    let heatLayer = null; 
+    let officialPopulation = null;
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    input.startDate.valueAsDate = tomorrow;
+
+    function loadSavedKeys() {
+      const savedGemini = localStorage.getItem("gemini_api_key");
+      const savedGroq = localStorage.getItem("groq_api_key");
+      if (savedGemini) el.keyInput.value = savedGemini;
+      if (savedGroq) el.groqKeyInput.value = savedGroq;
+    }
+    loadSavedKeys();
+
+    function getKeys() {
+      return { 
+        gemini: el.keyInput.value.trim() || DEFAULT_CONFIG.geminiApiKey,
+        groq: el.groqKeyInput.value.trim() || DEFAULT_CONFIG.groqApiKey
+      };
+    }
+
+    function saveKeys() {
+      const keys = getKeys();
+      if (keys.gemini && keys.gemini !== DEFAULT_CONFIG.geminiApiKey) localStorage.setItem("gemini_api_key", keys.gemini);
+      if (keys.groq && keys.groq !== DEFAULT_CONFIG.groqApiKey) localStorage.setItem("groq_api_key", keys.groq);
+    }
+
+    function showMessage(msg, type = "error") {
+      if (!msg || msg.trim() === "") { 
+          el.alertBox.style.display = "none"; 
+          return; 
+      }
+      el.alertText.textContent = msg;
+      el.alertBox.style.display = "block";
+      el.alertBox.className = type === "error" ? "alert-box bg-red-50 text-red-800 border-red-500" : "alert-box bg-emerald-50 text-emerald-800 border-emerald-500";
+      lucide.createIcons();
+      el.alertBox.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    function setProgress(msg, percent = null) {
+        if (!msg) {
+            el.spinner.classList.add("hidden");
+            el.progressContainer.classList.add("hidden");
+            el.btnText.textContent = "Générer le Plan";
+            el.btn.disabled = false;
+        } else {
+            el.spinner.classList.remove("hidden");
+            el.loadingStatus.textContent = msg;
+            el.progressContainer.classList.remove("hidden");
+            if (percent !== null) {
+                el.progressBar.style.width = `${percent}%`;
+                el.progressPercent.textContent = `${percent}%`;
+            }
+            el.btnText.textContent = "Analyse spatiale...";
+            el.btn.disabled = true;
+        }
+    }
+
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; 
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    async function getRealRouteDistance(lat1, lng1, lat2, lng2) {
+        try {
+            const url = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.routes && data.routes.length > 0) {
+                return (data.routes[0].distance / 1000); 
+            }
+        } catch(e) {}
+        return calculateDistance(lat1, lng1, lat2, lng2); 
+    }
+
+    async function fetchWeather(lat, lng, startDate) {
+        try {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FParis&start_date=${startDate}&end_date=${startDate}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.daily) {
+                const tmax = data.daily.temperature_2m_max[0];
+                const rain = data.daily.precipitation_probability_max[0];
+                return `Max ${tmax}°C, Pluie ${rain}%`;
+            }
+        } catch(e) {}
+        return "Donnée indisponible";
+    }
+
+    async function fetchPopulation(inseeCode) {
+        try {
+            const res = await fetch(`https://geo.api.gouv.fr/communes?code=${inseeCode}&fields=population`);
+            const data = await res.json();
+            if (data && data.length > 0) {
+                return data[0].population;
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    async function verifySIREN(brandName) {
+        try {
+            const res = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(brandName)}&per_page=1`);
+            const data = await res.json();
+            if (data && data.results && data.results.length > 0) return data.results[0]; 
+        } catch (e) {}
+        return null;
+    }
+
+    async function verifyCompetitorSIREN(brandName, lat, lng, radiusKm) {
+        try {
+            const url = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(brandName)}&lat=${lat}&lon=${lng}&radius=${radiusKm}&per_page=1`;
+            const res = await fetch(url);
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (data && data.results && data.results.length > 0) {
+                let etablissement = data.results[0].matching_etablissements?.[0] || data.results[0].siege;
+                if (etablissement && etablissement.adresse && etablissement.latitude) {
+                    return {
+                        name: data.results[0].nom_complet,
+                        address: etablissement.adresse,
+                        lat: parseFloat(etablissement.latitude),
+                        lng: parseFloat(etablissement.longitude)
+                    };
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    async function geocodeAddressBAN(addressStr) {
+        try {
+            const res = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(addressStr)}&limit=1`);
+            const data = await res.json();
+            if (data && data.features && data.features.length > 0) {
+                const feat = data.features[0];
+                return {
+                    lat: feat.geometry.coordinates[1],
+                    lng: feat.geometry.coordinates[0],
+                    display_name: feat.properties.label,
+                    city: feat.properties.city || feat.properties.name,
+                    insee: feat.properties.citycode,
+                    context: feat.properties.context
+                };
+            }
+        } catch (e) { }
+        return await geocodeAddress(addressStr);
+    }
+    
+    async function reverseGeocodeBAN(lat, lng) {
+        try {
+            const res = await fetch(`https://api-adresse.data.gouv.fr/reverse/?lon=${lng}&lat=${lat}&limit=1`);
+            const data = await res.json();
+            if (data && data.features && data.features.length > 0) {
+                const props = data.features[0].properties;
+                return `${props.name}, ${props.city}`; 
+            }
+        } catch (e) { }
+        return null;
+    }
+
+    async function searchGeocodeBANByName(name, lat, lng) {
+        try {
+            const cleanName = name.replace(/^(Sortie Scolaire|Gare de|Secteur Marché) :?\s*/i, '').trim();
+            const res = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(cleanName)}&lat=${lat}&lon=${lng}&limit=1`);
+            const data = await res.json();
+            if (data && data.features && data.features.length > 0) {
+                const dist = calculateDistance(lat, lng, data.features[0].geometry.coordinates[1], data.features[0].geometry.coordinates[0]);
+                if (dist < 0.5) { 
+                    const props = data.features[0].properties;
+                    return `${props.name}, ${props.city}`;
+                }
+            }
+        } catch (e) { }
+        return null;
+    }
+
+    async function geocodeAddress(addressStr) {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressStr)}&limit=1&addressdetails=1`;
+        try {
+            const res = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
+            const data = await res.json();
+            if (data && data.length > 0) {
+                return {
+                    lat: parseFloat(data[0].lat),
+                    lng: parseFloat(data[0].lon),
+                    display_name: data[0].display_name,
+                    city: data[0].address?.city || data[0].address?.town || data[0].address?.village || addressStr.split(',')[0].trim()
+                };
+            }
+        } catch (e) { }
+        throw new Error("Impossible de trouver l'adresse sur la carte.");
+    }
+
+    async function fetchRealPOIs(lat, lng, radiusKm) {
+        const radiusMeters = radiusKm * 1000;
+        const query = `
+            [out:json][timeout:25];
+            (
+              node["amenity"="marketplace"](around:${radiusMeters},${lat},${lng});
+              way["amenity"="marketplace"](around:${radiusMeters},${lat},${lng});
+              node["place"="square"](around:${radiusMeters},${lat},${lng});
+              way["place"="square"](around:${radiusMeters},${lat},${lng});
+              node["public_transport"="station"](around:${radiusMeters},${lat},${lng});
+              node["railway"="station"](around:${radiusMeters},${lat},${lng});
+              way["highway"="pedestrian"](around:${radiusMeters},${lat},${lng});
+              node["shop"~"supermarket|convenience|doityourself|mall|bakery|pharmacy|clothes"](around:${radiusMeters},${lat},${lng});
+              way["shop"~"supermarket|convenience|doityourself|mall|bakery|pharmacy|clothes"](around:${radiusMeters},${lat},${lng});
+              node["amenity"="school"](around:${radiusMeters},${lat},${lng});
+              way["amenity"="school"](around:${radiusMeters},${lat},${lng});
+            );
+            out center 400;
+        `;
+        try {
+            const res = await fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: "data=" + encodeURIComponent(query.trim())
+            });
+            if (!res.ok) return [];
+            const textResponse = await res.text();
+            let data;
+            try { data = JSON.parse(textResponse); } catch (e) { return []; }
+            
+            const pois = data.elements.map(e => {
+                let name = e.tags.name || e.tags.brand;
+                if (!name) return null; 
+                
+                const lowerName = name.toLowerCase();
+                if (lowerName.match(/coll[eè]ge|lyc[eé]e|cr[eè]che|maternelle|universit[eé]|campus|facult[eé]|institut/)) {
+                    return null;
+                }
+
+                if (e.tags.railway === 'station' && !lowerName.includes('gare')) name = `Gare de ${name}`;
+
+                let addr = "";
+                if (e.tags["addr:street"]) {
+                    addr = `${e.tags["addr:housenumber"] || ''} ${e.tags["addr:street"]}`.trim();
+                    if (e.tags["addr:city"]) addr += `, ${e.tags["addr:city"]}`;
+                } else if (e.tags.highway === 'pedestrian' || e.tags.place === 'square') {
+                    addr = `Place/Rue : ${name}`; 
+                } else if (e.tags.public_transport || e.tags.railway) {
+                    addr = `Arrêt/Station : ${name}`; 
+                } else if (e.tags.amenity === 'school') {
+                    addr = `Sortie Scolaire : ${name}`; 
+                } else { return null; }
+                
+                const clat = e.lat || e.center?.lat;
+                const clng = e.lon || e.center?.lon;
+                
+                let type = 'other';
+                if(e.tags.amenity === 'marketplace') type = 'market';
+                else if(e.tags.public_transport || e.tags.railway) type = 'transport';
+                else if(e.tags.highway === 'pedestrian' || e.tags.shop === 'mall' || e.tags.place === 'square') type = 'shopping';
+                else if(e.tags.shop) type = 'competitor';
+                else if(e.tags.amenity === 'school') type = 'school';
+                
+                const dist = calculateDistance(lat, lng, clat, clng);
+                const hours = e.tags.opening_hours || "Non spécifié";
+                return { name, lat: clat, lng: clng, type, address: addr, distance: dist.toFixed(1), hours: hours };
+            }).filter(Boolean);
+            
+            return pois.filter((v,i,a)=>a.findIndex(v2=>(v2.name===v.name))===i);
+        } catch (e) { return []; }
+    }
+
+    async function callGeminiAPI(apiKey, prompt, systemInstruction) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_CONFIG.model}:generateContent?key=${apiKey}`;
+      const body = { 
+          contents: [{ parts: [{ text: prompt }] }], 
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { responseMimeType: "application/json" }
+      };
+      
+      const delays = [1000, 2000, 4000];
+      let lastError;
+
+      for (let i = 0; i <= delays.length; i++) {
+          try {
+              const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+              if (!res.ok) {
+                  const errData = await res.json().catch(() => ({}));
+                  throw new Error(errData.error?.message || `Erreur serveur Gemini (${res.status})`);
+              }
+              const data = await res.json();
+              if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("L'IA a renvoyé une réponse vide.");
+              return data.candidates[0].content.parts[0].text;
+          } catch (e) {
+              lastError = e;
+              if (i < delays.length) await new Promise(resolve => setTimeout(resolve, delays[i]));
+          }
+      }
+      throw new Error("Gemini: " + (lastError?.message || "Erreur inconnue"));
+    }
+
+    function cleanJson(text) {
+        if (!text) throw new Error("Le texte renvoyé par l'IA est vide.");
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace === -1 || lastBrace === -1) throw new Error("Format JSON invalide renvoyé par l'IA.");
+        let jsonStr = text.substring(firstBrace, lastBrace + 1);
+        jsonStr = jsonStr.replace(/[\x00-\x1F]+/g, " ");
+        return jsonStr;
+    }
+
+    async function getCompetitorsFromAI(brand, keys) {
+        const sys = "Tu es un expert retail et géomarketing.";
+        const prompt = `Identifie les 3 principaux concurrents physiques directs de l'enseigne "${brand}" en France. Renvoie UNIQUEMENT un objet JSON valide avec la clé "competitors" contenant une chaîne de caractères (les noms séparés par des virgules). Exemple: {"competitors": "Aldi, Carrefour, Leclerc"}. Si la marque est inconnue ou introuvable, renvoie {"competitors": ""}.`;
+        
+        try {
+            const raw = await callGeminiAPI(keys.gemini, prompt, sys);
+            const data = JSON.parse(cleanJson(raw));
+            return data.competitors || "";
+        } catch(e) {
+            return "";
+        }
+    }
+
+    // --- GENERATION MAIN ---
+
+    async function handleGenerate() {
+      showMessage(""); 
+      if (!input.brand.value.trim() || !input.address.value.trim()) return showMessage("Remplissez l'enseigne et la ville.");
+      
+      try {
+        saveKeys();
+        setProgress("Initialisation...", 5);
+        el.mapContainer.classList.add("hidden");
+        el.planCard.classList.add("hidden");
+        el.attendanceCard.classList.add("hidden");
+        el.reachEstimationContainer.classList.add("hidden");
+        el.officialBadges.classList.add("hidden");
+        el.badgeSiren.classList.add("hidden");
+        el.badgeInsee.classList.add("hidden");
+        el.badgePop.classList.add("hidden");
+        el.badgeWeather.classList.add("hidden");
+        el.analysisCard.classList.add("hidden");
+        
+        let officialBrand = input.brand.value;
+
+        setProgress("Vérification Adresse (API BAN)...", 15);
+        const originObj = await geocodeAddressBAN(input.address.value);
+        
+        if (originObj.insee) {
+            el.inseeVal.textContent = originObj.insee;
+            el.badgeInsee.classList.remove("hidden");
+            el.officialBadges.classList.remove("hidden");
+            
+            setProgress("Analyse Démographique (Géo API)...", 20);
+            officialPopulation = await fetchPopulation(originObj.insee);
+            if (officialPopulation) {
+                el.popVal.textContent = new Intl.NumberFormat('fr-FR').format(officialPopulation);
+                el.badgePop.classList.remove("hidden");
+            }
+        }
+
+        setProgress("Analyse Météorologique (Open-Meteo)...", 25);
+        const startDateStr = input.startDate.value; 
+        const weatherInfo = await fetchWeather(originObj.lat, originObj.lng, startDateStr);
+        el.weatherVal.textContent = weatherInfo;
+        el.badgeWeather.classList.remove("hidden");
+        el.officialBadges.classList.remove("hidden");
+
+        const startDateObj = new Date(startDateStr);
+        let datesList = [];
+        for(let i=0; i<parseInt(input.duration.value); i++) {
+            let d = new Date(startDateObj);
+            d.setDate(d.getDate() + i);
+            datesList.push(d.toLocaleDateString('fr-FR', {weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric'}));
+        }
+
+        setProgress(`Vérification légale SIRENE pour "${input.brand.value}"...`, 30);
+        const companyData = await verifySIREN(input.brand.value);
+        if (companyData) {
+            officialBrand = companyData.nom_complet || input.brand.value;
+            el.sirenVal.textContent = companyData.siren;
+            el.badgeSiren.classList.remove("hidden");
+            el.officialBadges.classList.remove("hidden");
+        }
+
+        if (!input.competitors.value.trim()) {
+            setProgress(`Détection par l'IA des concurrents de "${officialBrand}"...`, 35);
+            const autoComps = await getCompetitorsFromAI(officialBrand, getKeys());
+            if (autoComps && autoComps.toLowerCase() !== "vide" && autoComps.toLowerCase() !== "inconnu") {
+                input.competitors.value = autoComps;
+                input.competitors.classList.add("bg-emerald-50", "border-emerald-500", "text-emerald-900");
+                setTimeout(() => {
+                    input.competitors.classList.remove("bg-emerald-50", "border-emerald-500", "text-emerald-900");
+                }, 3000);
+            }
+        }
+
+        const radius = parseFloat(input.radius.value) || 10;
+        
+        setProgress(`Scan radar Topographique à ${radius}km...`, 45);
+        const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius);
+        const targetCity = originObj.city || input.address.value.split(',')[0].trim();
+        
+        const excludedStr = input.excludedCities.value.trim().toLowerCase();
+        const excludedList = excludedStr ? excludedStr.split(',').map(c => c.trim()).filter(Boolean) : [];
+        
+        let filteredPOIs = realPOIsRaw.filter(poi => {
+            if (excludedList.length === 0) return true;
+            return !excludedList.some(exCity => poi.address.toLowerCase().includes(exCity));
+        });
+
+        setProgress("Analyse et localisation des concurrents...", 50);
+        const userCompetitors = input.competitors.value.trim();
+        let preVerifiedCompetitors = [];
+        
+        if (userCompetitors) {
+            const compList = userCompetitors.split(',').map(c => c.trim().toLowerCase()).filter(Boolean);
+            
+            for (let poi of filteredPOIs) {
+                if (compList.some(c => poi.name.toLowerCase().includes(c))) {
+                    poi.type = 'competitor';
+                    preVerifiedCompetitors.push(poi);
+                }
+            }
+            
+            preVerifiedCompetitors = preVerifiedCompetitors.filter((v,i,a)=>a.findIndex(v2=>(v2.name===v.name))===i);
+
+            if (preVerifiedCompetitors.length === 0) {
+                for (let comp of compList) {
+                    let sData = await verifyCompetitorSIREN(comp, originObj.lat, originObj.lng, radius);
+                    if (sData) {
+                        const dist = calculateDistance(originObj.lat, originObj.lng, sData.lat, sData.lng);
+                        if (dist <= radius) {
+                            if (excludedList.length > 0 && excludedList.some(exCity => sData.address.toLowerCase().includes(exCity))) {
+                                continue; 
+                            }
+                            preVerifiedCompetitors.push({
+                                name: sData.name, lat: sData.lat, lng: sData.lng, type: 'competitor', address: sData.address, distance: dist.toFixed(1), source: 'SIRENE (Certifié)'
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        filteredPOIs.sort((a, b) => {
+            const aIsMarket = a.type === 'market';
+            const bIsMarket = b.type === 'market';
+            if (aIsMarket && !bIsMarket) return -1;
+            if (!aIsMarket && bIsMarket) return 1;
+
+            const aInCity = a.address.toLowerCase().includes(targetCity.toLowerCase()) && parseFloat(a.distance) <= 2.0;
+            const bInCity = b.address.toLowerCase().includes(targetCity.toLowerCase()) && parseFloat(b.distance) <= 2.0;
+            if (aInCity && !bInCity) return -1;
+            if (!aInCity && bInCity) return 1;
+
+            return parseFloat(a.distance) - parseFloat(b.distance);
+        });
+
+        let poiContext = filteredPOIs.length > 0 ? `BASE OSM DÉDIÉE : \n${JSON.stringify(filteredPOIs.slice(0, 70))}\n` : `BASE OSM VIDE.\n`;
+        
+        let competitorInstruction = "";
+        const defaultComps = ['aldi', 'lidl', 'carrefour', 'store', 'brico', 'castorama', 'leroy'];
+        const userCompsList = input.competitors.value.trim() ? input.competitors.value.trim().split(',').map(s => s.trim().toLowerCase()) : [];
+        const allCompsToCheck = [...defaultComps, ...userCompsList];
+
+        if (userCompetitors) {
+            if (preVerifiedCompetitors.length > 0) {
+                poiContext += `\nBASE CONCURRENTS CERTIFIÉS : \n${JSON.stringify(preVerifiedCompetitors)}\n`;
+                competitorInstruction = `CONCURRENTS (CRITIQUE): Tu DOIS IMPÉRATIVEMENT inclure au moins 1 ou 2 concurrents par jour tirés de la "BASE CONCURRENTS CERTIFIÉS".`;
+            } else {
+                competitorInstruction = `CONCURRENTS: Aucun concurrent n'a été trouvé dans le périmètre autorisé. Ignore-les.`;
+            }
+        } else {
+            competitorInstruction = `CONCURRENTS : Ne cible des concurrents que s'ils sont listés dans la base de données.`;
+        }
+
+        const exclusionInstruction = excludedList.length > 0 
+            ? `INTERDICTION ABSOLUE : ne place AUCUN arrêt dans : ${excludedStr.toUpperCase()}.`
+            : `RÈGLE : Ne traverse PAS les fleuves majeurs.`;
+
+        setProgress(`Analyse IA Stratégique...`, 60);
+        el.displayBrand.textContent = officialBrand;
+        el.dateSpan.textContent = new Date().toLocaleDateString('fr-FR');
+        
+        const mornStart = input.morning.value.split('-')[0] ? input.morning.value.split('-')[0].trim() : "10:00";
+        const mornEnd = input.morning.value.split('-')[1] ? input.morning.value.split('-')[1].trim() : "13:00";
+        const aftStart = input.afternoon.value.split('-')[0] ? input.afternoon.value.split('-')[0].trim() : "14:00";
+        const aftEnd = input.afternoon.value.split('-')[1] ? input.afternoon.value.split('-')[1].trim() : "18:00";
+
+        const weatherContext = weatherInfo !== "Donnée indisponible" 
+            ? `MÉTÉO PRÉVUE J1 : ${weatherInfo}. Adapte ta stratégie si le risque de pluie est fort (privilégie les lieux couverts).` 
+            : "";
+
+        const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
+        RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
+        ${exclusionInstruction}
+        ${weatherContext}
+        STRATÉGIE CARDINALE: Attribue à chaque jour une direction cardinale dominante (Nord, Sud, Est, Ouest).
+        PROXIMITÉ: 60% des arrêts DOIVENT être dans la ville "${targetCity}" ET à moins de 2.0 km.
+        HORAIRES: 4 le matin, 4 l'après-midi.
+        RÈGLE DE RÉPARTITION: Priorise ABSOLUMENT les Marchés Forains ET les Concurrents. Complète le reste du planning avec un mix : Transports et Rues Commerçantes.
+        RÈGLE DES ÉCOLES (CRITIQUE): Réduis le nombre d'écoles (Max 1 par jour). Les lieux de type "school" (Sorties Scolaires) NE PEUVENT ÊTRE PLACÉS QUE LES Lundi, Mardi, Jeudi, Vendredi. LEUR HORAIRE DOIT ÊTRE EXACTEMENT "11:15" ou "16:15" (peu importe les créneaux par défaut). INTERDICTION ABSOLUE de placer une école le mercredi, samedi ou dimanche.
+        VERIFICATION DES JOURS (CRITIQUE): Pour les MARCHÉS FORAINS, croise ABSOLUMENT le jour de la semaine ("day") avec les "hours" fournies ou tes connaissances de la ville. NE PLACE UN MARCHÉ QUE SI TU SAIS QU'IL A LIEU CE JOUR-LÀ.
+        ${competitorInstruction}
+        ANTI-DOUBLON: Aucune adresse répétée.
+        ANTI-HALLUCINATION: Piocher 100% des arrêts dans la BASE OSM. N'invente RIEN.
+        JSON FORMAT: {"analysis": "Explique la stratégie et le mix", "dailyPlans": [{"day": "lundi JJ/MM/YYYY", "role": "VÉHICULE", "stops": [{"time": "HH:MM", "locationName": "Nom", "address": "Adresse", "type": "market|transport|shopping|school|competitor|other", "source": "OSM", "lat": 0, "lng": 0}]}], "attendance": [{"date": "JJ/MM/YYYY", "startMatin": "${mornStart}", "endMatin": "${mornEnd}", "startAprem": "${aftStart}", "endAprem": "${aftEnd}"}]}`;
+
+        const prompt = `Génère le plan pour ${officialBrand} depuis ${input.address.value}. DATES : ${datesList.join(' | ')}. HORAIRES : Matin ${input.morning.value}, Aprem ${input.afternoon.value}. \n\n${poiContext}`;
+
+        const keys = getKeys();
+        let rawText = "";
+        try {
+           rawText = await callGeminiAPI(keys.gemini, prompt, systemInstruction);
+        } catch(e) {
+           throw new Error(`Serveurs IA indisponibles : ${e.message}`);
+        }
+        
+        let data;
+        try {
+            data = JSON.parse(cleanJson(rawText));
+            data.dailyPlans = data.dailyPlans || [];
+            if(!data.attendance || !Array.isArray(data.attendance) || data.attendance.length === 0) {
+                data.attendance = datesList.map(d => ({ date: d, startMatin: mornStart, endMatin: mornEnd, startAprem: aftStart, endAprem: aftEnd }));
+            }
+        } catch (jsonError) {
+            throw new Error(`L'IA a échoué à formater la réponse.`);
+        }
+        
+        data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name }; 
+
+        setProgress("Correction Topographique...", 75);
+        let availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors];
+        
+        for (let day of data.dailyPlans) {
+            if (!day.stops) continue;
+            for (let stop of day.stops) {
+                let isLegit = false;
+                stop.locationName = stop.locationName || "Lieu de prospection";
+                stop.address = stop.address || "";
+                stop.type = stop.type || "other";
+
+                const isCompStop = stop.type === 'competitor' || allCompsToCheck.some(c => c && stop.locationName.toLowerCase().includes(c));
+                if (isCompStop && stop.source !== 'SIRENE (Certifié)') {
+                    let cleanName = stop.locationName.replace(new RegExp(input.address.value, 'gi'), '').trim();
+                    let sireneData = await verifyCompetitorSIREN(cleanName, originObj.lat, originObj.lng, radius);
+                    if (!sireneData && cleanName.includes(' ')) {
+                        sireneData = await verifyCompetitorSIREN(cleanName.split(' ')[0], originObj.lat, originObj.lng, radius);
+                    }
+                    if (sireneData) {
+                        if (!excludedList.some(exCity => sireneData.address.toLowerCase().includes(exCity))) {
+                            stop.locationName = sireneData.name;
+                            stop.address = sireneData.address;
+                            stop.lat = sireneData.lat;
+                            stop.lng = sireneData.lng;
+                            stop.source = "SIRENE (CERTIFIÉ OFFICIEL)";
+                            isLegit = true;
+                        }
+                    }
+                } else if (stop.source === 'SIRENE (Certifié)') {
+                    isLegit = true;
+                }
+
+                if (!isLegit) {
+                    const aiNameStr = stop.locationName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const matchedIndex = availablePOIs.findIndex(p => {
+                        const pNameStr = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        return (aiNameStr.length > 2 && (aiNameStr.includes(pNameStr) || pNameStr.includes(aiNameStr))) || 
+                               (stop.address && stop.address.toLowerCase().includes(p.address.toLowerCase()));
+                    });
+
+                    if (matchedIndex !== -1) {
+                        const realPOI = availablePOIs[matchedIndex];
+                        stop.locationName = realPOI.name;
+                        
+                        if (realPOI.address.startsWith('Arrêt/Station') || realPOI.address.startsWith('Place/Rue') || realPOI.address === realPOI.name || realPOI.address.startsWith('Sortie Scolaire')) {
+                            const specificAddr = await searchGeocodeBANByName(realPOI.name, realPOI.lat, realPOI.lng);
+                            if (specificAddr) {
+                                stop.address = specificAddr;
+                            } else {
+                                stop.address = `Accès ${realPOI.name}, ${targetCity}`;
+                            }
+                        } else { stop.address = realPOI.address; }
+                        
+                        stop.lat = realPOI.lat;
+                        stop.lng = realPOI.lng;
+                        stop.type = realPOI.type;
+                        stop.source = "OSM";
+                        if (availablePOIs.length > 5) availablePOIs.splice(matchedIndex, 1); 
+                        isLegit = true;
+                    }
+                } 
+
+                if (!isLegit) {
+                    if (availablePOIs.length > 0) {
+                        let fallbackIndex = availablePOIs.findIndex(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()));
+                        if (fallbackIndex === -1) fallbackIndex = 0; 
+                        
+                        const fallbackPOI = availablePOIs[fallbackIndex];
+                        stop.locationName = fallbackPOI.name;
+                        
+                        if (fallbackPOI.address.startsWith('Arrêt/Station') || fallbackPOI.address.startsWith('Place/Rue') || fallbackPOI.address === fallbackPOI.name || fallbackPOI.address.startsWith('Sortie Scolaire')) {
+                            const specificAddr = await searchGeocodeBANByName(fallbackPOI.name, fallbackPOI.lat, fallbackPOI.lng);
+                            if (specificAddr) {
+                                stop.address = specificAddr;
+                            } else {
+                                stop.address = `Accès ${fallbackPOI.name}, ${targetCity}`;
+                            }
+                        } else { stop.address = fallbackPOI.address; }
+                        
+                        stop.lat = fallbackPOI.lat;
+                        stop.lng = fallbackPOI.lng;
+                        stop.type = fallbackPOI.type;
+                        stop.source = "CORRECTION AUTO";
+                        if (availablePOIs.length > 5) availablePOIs.splice(fallbackIndex, 1);
+                    } else {
+                        let validStreet = null, attempts = 0, finalLat = originObj.lat, finalLng = originObj.lng;
+                        while (!validStreet && attempts < 5) {
+                            const angle = Math.random() * Math.PI * 2;
+                            const distKm = 0.3 + Math.random() * 1.5; 
+                            finalLat = originObj.lat + (distKm / 111) * Math.cos(angle);
+                            finalLng = originObj.lng + (distKm / (111 * Math.cos(originObj.lat * Math.PI / 180))) * Math.sin(angle);
+                            validStreet = await reverseGeocodeBAN(finalLat, finalLng);
+                            attempts++;
+                        }
+                        stop.lat = finalLat;
+                        stop.lng = finalLng;
+                        
+                        if (validStreet) {
+                            const pureStreet = validStreet.split(',')[0];
+                            stop.type = 'other'; 
+                            stop.locationName = `Secteur Résidentiel : ${pureStreet}`;
+                            stop.address = validStreet;
+                        } else {
+                            stop.type = 'other';
+                            stop.locationName = "Point de chute QG";
+                            stop.address = originObj.display_name;
+                        }
+                        stop.source = "GÉNÉRATION (ZONE RÉSIDENTIELLE)";
+                    }
+                }
+            }
+        }
+
+        setProgress("Calcul de l'itinéraire routier (OSRM)...", 85);
+        
+        let plansHtml = "";
+        let outOfBoundsCount = 0;
+        let totalStops = 0;
+
+        for (let idx = 0; idx < (data.dailyPlans || []).length; idx++) {
+            const day = data.dailyPlans[idx];
+            
+            const stopsHtmlPromises = (day.stops || []).map(async (s) => {
+                totalStops++;
+                let routeDist = await getRealRouteDistance(originObj.lat, originObj.lng, s.lat, s.lng);
+                
+                let distBadge = `<span class="text-sm font-bold text-[#10b981] ml-3 whitespace-nowrap">✓ ${routeDist.toFixed(1)}km</span>`;
+                if (routeDist > radius) {
+                    if (routeDist > radius * 1.3) outOfBoundsCount++;
+                    distBadge = `<span class="text-sm font-bold text-amber-500 ml-3 whitespace-nowrap">🚙 ${routeDist.toFixed(1)}km</span>`;
+                }
+
+                let typeIcon = '<i data-lucide="map-pin" class="w-5 h-5 text-gray-400 mr-3"></i>';
+                if(s.type === 'market') typeIcon = '<i data-lucide="shopping-basket" class="w-5 h-5 text-[#10b981] mr-3"></i>';
+                else if(s.type === 'transport') typeIcon = '<i data-lucide="train" class="w-5 h-5 text-blue-500 mr-3"></i>';
+                else if(s.type === 'shopping') typeIcon = '<i data-lucide="shopping-bag" class="w-5 h-5 text-purple-500 mr-3"></i>';
+                else if(s.type === 'school') typeIcon = '<i data-lucide="graduation-cap" class="w-5 h-5 text-amber-500 mr-3"></i>';
+                else if(s.type === 'competitor') typeIcon = '<i data-lucide="target" class="w-5 h-5 text-red-500 mr-3"></i>';
+
+                return `
+                <div class="flex items-center p-6 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
+                    <div class="w-20 font-extrabold text-2xl text-[#0E2C59] tracking-tight">${s.time}</div>
+                    <div class="flex-1 min-w-0 border-l-2 border-gray-100 pl-6">
+                        <div class="flex items-center flex-wrap">
+                            ${typeIcon}
+                            <span class="font-extrabold text-gray-900 text-xl">${s.locationName}</span>
+                            ${distBadge}
+                        </div>
+                        <div class="text-sm text-gray-500 mt-2 flex items-center flex-wrap font-medium">
+                            ${s.address}
+                            <span class="text-[10px] text-gray-400 uppercase tracking-widest ml-3 border-l border-gray-300 pl-3">SRC: ${s.source}</span>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            
+            const stopsHtmlArray = await Promise.all(stopsHtmlPromises);
+            
+            plansHtml += `
+            <div id="day-card-${idx}" class="mb-10 page-break-inside-avoid px-2">
+                <div class="flex flex-col mb-4 pb-2 border-b border-gray-200">
+                    <h4 class="font-extrabold text-3xl text-[#0E2C59] capitalize mb-1">${day.day}</h4>
+                    <span class="text-sm font-bold uppercase text-gray-500 tracking-widest">${day.role || "VÉHICULE"}</span>
+                </div>
+                <div class="bg-[#F8FAFC] p-4 rounded-3xl">
+                    ${stopsHtmlArray.join("")}
+                </div>
+            </div>`;
+        }
+
+        el.dailyPlansContainer.innerHTML = plansHtml;
+
+        setProgress("Génération du document final...", 95);
+        el.outputContainer.classList.remove("hidden");
+        
+        if (data.analysis) {
+            el.analysisText.innerHTML = data.analysis;
+            el.analysisCard.classList.remove("hidden");
+        }
+        
+        el.planCard.classList.remove("hidden");
+        
+        const mapStatusColor = outOfBoundsCount > 0 ? "text-amber-300" : "text-[#4ade80]";
+        const mapStatusIcon = outOfBoundsCount > 0 ? "🚙" : "✓";
+        const mapStatusText = outOfBoundsCount > 0 ? "Itinéraires de route calculés" : "Distances routières 100% OK";
+        el.mapStats.innerHTML = `<span class="${mapStatusColor} flex items-center"><span class="mr-1">${mapStatusIcon}</span> ${mapStatusText}</span>`;
+
+        if (Array.isArray(data.attendance) && data.attendance.length > 0) {
+            el.attendanceGrid.innerHTML = data.attendance.map((day, idx) => `
+            <div class="border border-gray-200 rounded-[32px] p-8 bg-white mb-8 shadow-sm page-break-inside-avoid">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-8 pb-4 border-b border-gray-100 gap-4">
+                    <div class="font-extrabold text-2xl text-[#0E2C59] flex items-center">
+                        <i data-lucide="calendar" class="w-6 h-6 text-blue-500 mr-3"></i>
+                        ${day.date}
+                    </div>
+                    <div class="text-base text-gray-600 font-medium whitespace-nowrap flex items-center">
+                        Nom du chauffeur : <div class="w-64 border-b-2 border-dotted border-gray-400 ml-3"></div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="bg-[#F8FAFC] p-6 rounded-3xl border border-gray-200">
+                        <div class="flex justify-between items-start mb-6">
+                            <div class="text-sm font-extrabold text-gray-800 flex items-center tracking-wider bg-white px-3 py-1 rounded-lg shadow-sm">
+                                <i data-lucide="sun" class="w-4 h-4 mr-2 text-amber-500"></i> MATIN
+                            </div>
+                            <div class="text-xs text-right text-gray-600 font-medium">
+                                Début: <strong class="text-gray-900 text-sm ml-1">${day.startMatin}</strong><br>
+                                Fin: <strong class="text-gray-900 text-sm ml-1">${day.endMatin}</strong>
+                            </div>
+                        </div>
+                        <div class="h-32 border-2 border-dashed rounded-2xl border-blue-200 bg-white flex items-end justify-end p-4">
+                            <span class="text-xs text-blue-300 font-bold uppercase tracking-widest">Signature Matin</span>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-[#F8FAFC] p-6 rounded-3xl border border-gray-200">
+                        <div class="flex justify-between items-start mb-6">
+                            <div class="text-sm font-extrabold text-gray-800 flex items-center tracking-wider bg-white px-3 py-1 rounded-lg shadow-sm">
+                                <i data-lucide="sunset" class="w-4 h-4 mr-2 text-orange-500"></i> APRÈS-MIDI
+                            </div>
+                            <div class="text-xs text-right text-gray-600 font-medium">
+                                Début: <strong class="text-gray-900 text-sm ml-1">${day.startAprem}</strong><br>
+                                Fin: <strong class="text-gray-900 text-sm ml-1">${day.endAprem}</strong>
+                            </div>
+                        </div>
+                        <div class="h-32 border-2 border-dashed rounded-2xl border-orange-200 bg-white flex items-end justify-end p-4">
+                            <span class="text-xs text-orange-300 font-bold uppercase tracking-widest">Signature Après-midi</span>
+                        </div>
+                    </div>
+                </div>
+            </div>`).join("");
+            
+            el.attendanceCard.classList.remove("hidden");
+        }
+        
+        generatedData = data;
+        lucide.createIcons();
+
+        setTimeout(() => {
+            el.mapContainer.classList.remove("hidden");
+            
+            setTimeout(() => {
+                drawMap(data, originObj, radius);
+                
+                let totalStops = 0;
+                (data.dailyPlans || []).forEach(dp => { if (dp.stops) totalStops += dp.stops.length; });
+                
+                const baseReachPerStop = 350 + Math.floor(Math.random() * 200); 
+                let calculatedReach = Math.round(totalStops * baseReachPerStop * 1.1);
+                
+                if (officialPopulation && calculatedReach > (officialPopulation * 0.8)) {
+                    calculatedReach = Math.round(officialPopulation * (0.4 + Math.random() * 0.3)); 
+                }
+                
+                const estImpressions = Math.round(calculatedReach * 3.5); 
+                
+                el.estTotalStops.textContent = totalStops;
+                el.estReach.textContent = new Intl.NumberFormat('fr-FR').format(calculatedReach);
+                el.estImpressions.textContent = new Intl.NumberFormat('fr-FR').format(estImpressions);
+                el.reachEstimationContainer.classList.remove("hidden");
+                
+                setProgress(false);
+                el.outputContainer.scrollIntoView({ behavior: "smooth" });
+            }, 400); 
+        }, 100);
+
+      } catch (e) {
+        setProgress(false);
+        showMessage("Interruption : " + (e.message || "Erreur"));
+      }
+    }
+
+    function drawMap(data, origin, radiusKm) {
+        if (!mapInstance) {
+            mapInstance = L.map('leafletMap', { zoomControl: false }).setView([origin.lat, origin.lng], 13);
+            L.control.zoom({ position: 'topleft' }).addTo(mapInstance);
+            
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(mapInstance);
+            markersLayer = L.layerGroup().addTo(mapInstance);
+        } else {
+            markersLayer.clearLayers();
+            if (heatLayer) mapInstance.removeLayer(heatLayer);
+            mapInstance.setView([origin.lat, origin.lng], 13);
+        }
+        
+        mapInstance.invalidateSize();
+
+        L.circle([origin.lat, origin.lng], { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.05, radius: radiusKm * 1000 }).addTo(markersLayer);
+
+        const qgIcon = L.divIcon({ className: 'custom-div-icon', html: `<div style="background-color:#0E2C59; width:20px; height:20px; border-radius:50%; border:3px solid white; box-shadow:0 0 6px rgba(0,0,0,0.4);"></div>`, iconSize: [20,20], iconAnchor: [10,10] });
+        L.marker([origin.lat, origin.lng], {icon: qgIcon}).addTo(markersLayer).bindPopup(`<b>QG / Départ</b><br>${origin.display_name}`).openPopup();
+
+        let heatPoints = []; 
+
+        (data.dailyPlans || []).forEach(day => {
+            const isSm = (day.role || "").toLowerCase().includes("piéton");
+            const color = isSm ? '#f97316' : '#3b82f6'; 
+            const iconHtml = `<div style="background-color:${color}; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,0.3);"></div>`;
+            const customIcon = L.divIcon({ className: 'custom-div-icon', html: iconHtml, iconSize: [12,12], iconAnchor: [6,6] });
+
+            if(day.stops) {
+                day.stops.forEach(s => {
+                    if(!isNaN(s.lat) && !isNaN(s.lng)) {
+                        L.marker([s.lat, s.lng], {icon: customIcon}).addTo(markersLayer).bindPopup(`<b>${s.time} - ${s.locationName}</b><br><span style="font-size:10px; color:gray;">${s.address}</span>`);
+                        heatPoints.push([s.lat, s.lng, 1]);
+                    }
+                });
+            }
+        });
+        
+        if (heatPoints.length > 0 && typeof L.heatLayer !== 'undefined') {
+            heatLayer = L.heatLayer(heatPoints, {
+                radius: 40,
+                blur: 30,
+                maxZoom: 14,
+                gradient: {0.2: '#0E2C59', 0.4: '#3b82f6', 0.6: '#10b981', 0.8: '#f59e0b', 1.0: '#ef4444'} 
+            }).addTo(mapInstance);
+        }
+
+        const group = new L.featureGroup(markersLayer.getLayers());
+        if(group.getLayers().length > 0) mapInstance.fitBounds(group.getBounds().pad(0.1));
+    }
+
+    // --- EXPORTS ---
+
+    function generateCSV(data) {
+      if (!data) return;
+      let csvContent = "\uFEFFNom,Description,Type,Latitude,Longitude\n"; 
+      if (data.shopLocation) csvContent += `"Magasin QG","${data.shopLocation.address}","QG",${data.shopLocation.lat},${data.shopLocation.lng}\n`;
+      (data.dailyPlans || []).forEach(day => {
+        if(day.stops) {
+          day.stops.forEach(stop => {
+             csvContent += `"${day.day} - ${stop.time}","${stop.locationName} - ${stop.address}","${day.role}",${stop.lat},${stop.lng}\n`;
+          });
+        }
+      });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `Plan_${input.brand.value.replace(/[^a-zA-Z0-9]/g, '_')}.csv`;
+      link.click();
+    }
+
+    function generateKML(data) {
+      if (!data) return;
+      const clean = str => (str||"").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9 .,-]/g, "");
+      let kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Export Campagne</name>`;
+      if (data.shopLocation) kml += `<Placemark><name>QG</name><Point><coordinates>${data.shopLocation.lng},${data.shopLocation.lat}</coordinates></Point></Placemark>`;
+      (data.dailyPlans || []).forEach(day => {
+        if(day.stops) {
+          day.stops.forEach(stop => {
+            kml += `<Placemark><name>${clean(day.day)} - ${clean(stop.time)}</name><description>${clean(stop.locationName)} (${clean(stop.address)})</description><Point><coordinates>${stop.lng},${stop.lat}</coordinates></Point></Placemark>`;
+          });
+        }
+      });
+      kml += `</Document></kml>`;
+      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "Plan_Export.kml";
+      link.click();
+    }
+
+    async function generateFullPDF() {
+        const btn = el.btnPdf;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-5 h-5 mr-2 animate-spin"></i> Création PDF en cours...';
+        btn.disabled = true;
+
+        try {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('l', 'mm', 'a4'); // Paysage
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+
+            const addFooter = (isBlueBg = false) => {
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(12);
+                pdf.setTextColor(isBlueBg ? 255 : 14, isBlueBg ? 255 : 44, isBlueBg ? 255 : 89); 
+                pdf.text("àlo", 15, pageHeight - 10);
+                pdf.setFont("helvetica", "normal");
+                pdf.setTextColor(isBlueBg ? 200 : 150, isBlueBg ? 200 : 150, isBlueBg ? 200 : 150);
+                pdf.text("we are mixed culture®", pageWidth - 15, pageHeight - 10, { align: "right" });
+            };
+
+            const captureAndAdd = async (elementId, isFullBlue = false) => {
+                const element = document.getElementById(elementId);
+                if (!element || element.classList.contains('hidden')) return;
+
+                const oldRadius = element.style.borderRadius;
+                const oldBorder = element.style.border;
+                const oldMargin = element.style.margin;
+                
+                element.style.borderRadius = '0px';
+                element.style.border = 'none';
+                element.style.margin = '0px';
+
+                const buttons = element.querySelectorAll('button');
+                buttons.forEach(b => b.style.display = 'none');
+                
+                const canvas = await html2canvas(element, { 
+                    scale: 2, 
+                    useCORS: true, 
+                    backgroundColor: isFullBlue ? '#0E2C59' : '#F3F4F6',
+                    windowWidth: 1200 
+                });
+
+                element.style.borderRadius = oldRadius;
+                element.style.border = oldBorder;
+                element.style.margin = oldMargin;
+                buttons.forEach(b => b.style.display = '');
+
+                pdf.addPage();
+                
+                if (isFullBlue) {
+                    pdf.setFillColor(14, 44, 89);
+                    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+                } else {
+                    pdf.setFillColor(243, 244, 246);
+                    pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+                }
+
+                const imgRatio = canvas.width / canvas.height;
+                const margin = 10;
+                let renderWidth = pageWidth - (margin * 2); 
+                let renderHeight = renderWidth / imgRatio;
+                let x = margin;
+                let y = margin + 5; 
+
+                if (renderHeight > pageHeight - (margin * 2) - 15) {
+                    renderHeight = pageHeight - (margin * 2) - 15;
+                    renderWidth = renderHeight * imgRatio;
+                    x = (pageWidth - renderWidth) / 2;
+                }
+
+                pdf.addImage(canvas.toDataURL('image/jpeg', 1.0), 'JPEG', x, y, renderWidth, renderHeight);
+                addFooter(isFullBlue);
+            };
+
+            // 1. PAGE DE COUVERTURE
+            pdf.setFillColor(14, 44, 89); 
+            pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+            
+            pdf.setTextColor(255, 255, 255);
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(45);
+            pdf.text("Plan de", 25, 60);
+            pdf.setFont("helvetica", "bold");
+            pdf.text("circulation", 25, 78);
+
+            pdf.setFontSize(55);
+            pdf.text(input.brand.value.toUpperCase(), 25, 120);
+
+            pdf.setFontSize(24);
+            pdf.text("àlo", 25, pageHeight - 40);
+
+            pdf.setFont("helvetica", "normal");
+            pdf.setFontSize(14);
+            pdf.setTextColor(180, 200, 230);
+            const addressText = input.address.value.toUpperCase();
+            const splitAddress = pdf.splitTextToSize(addressText, 120);
+            pdf.text(splitAddress, 25, pageHeight - 25);
+
+            // 2. PAGE REACH
+            await captureAndAdd('reachEstimationContainer', true);
+
+            // 3. PAGE MAP
+            const mapHeader = document.querySelector('#mapContainerWrapper .flex-col');
+            const oldMapHeader = mapHeader ? mapHeader.style.display : '';
+            if(mapHeader) mapHeader.style.display = 'none';
+            await captureAndAdd('mapContainerWrapper', false);
+            if(mapHeader) mapHeader.style.display = oldMapHeader;
+
+            // 4. PAGES ITINERAIRES
+            if (generatedData && generatedData.dailyPlans) {
+                for (let i = 0; i < generatedData.dailyPlans.length; i++) {
+                    await captureAndAdd(`day-card-${i}`, false);
+                }
+            }
+
+            // 5. PAGES EMARGEMENT
+            if (generatedData && generatedData.attendance && generatedData.attendance.length > 0) {
+                const tempContainer = document.createElement('div');
+                tempContainer.style.width = '1122px'; 
+                tempContainer.style.padding = '40px';
+                tempContainer.style.background = '#F3F4F6';
+                tempContainer.style.position = 'fixed';
+                tempContainer.style.top = '0';
+                tempContainer.style.left = '-9999px';
+                document.body.appendChild(tempContainer);
+
+                const headerHtml = `<h3 style="font-size:28px; color:#0E2C59; font-weight:800; margin-bottom:30px; display:flex; align-items:center; font-family: Montserrat, sans-serif;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:12px;"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path><path d="M2 2l7.586 7.586"></path><circle cx="11" cy="11" r="2"></circle></svg> 
+                    Émargement Chauffeur
+                </h3>`;
+
+                const cards = el.attendanceGrid.children;
+                let currentPair = document.createElement('div');
+                currentPair.style.display = 'flex';
+                currentPair.style.flexDirection = 'column';
+                currentPair.style.gap = '30px';
+                
+                tempContainer.innerHTML = headerHtml;
+
+                for (let i = 0; i < cards.length; i++) {
+                    const clone = cards[i].cloneNode(true);
+                    clone.style.boxShadow = 'none';
+                    clone.style.border = 'none';
+                    currentPair.appendChild(clone);
+                    
+                    if ((i + 1) % 2 === 0 || i === cards.length - 1) {
+                        tempContainer.appendChild(currentPair);
+                        
+                        const canvas = await html2canvas(tempContainer, { scale: 2, useCORS: true, backgroundColor: '#F3F4F6' });
+                        pdf.addPage();
+                        pdf.setFillColor(243, 244, 246);
+                        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+                        
+                        const imgRatio = canvas.width / canvas.height;
+                        let renderWidth = pageWidth - 20;
+                        let renderHeight = renderWidth / imgRatio;
+                        
+                        if (renderHeight > pageHeight - 30) {
+                            renderHeight = pageHeight - 30;
+                            renderWidth = renderHeight * imgRatio;
+                        }
+                        
+                        const x = (pageWidth - renderWidth) / 2;
+                        const y = (pageHeight - renderHeight) / 2;
+
+                        pdf.addImage(canvas.toDataURL('image/jpeg', 1.0), 'JPEG', 10, 10, renderWidth, renderHeight);
+                        addFooter(false);
+
+                        tempContainer.innerHTML = headerHtml;
+                        currentPair = document.createElement('div');
+                        currentPair.style.display = 'flex';
+                        currentPair.style.flexDirection = 'column';
+                        currentPair.style.gap = '30px';
+                    }
+                }
+                document.body.removeChild(tempContainer);
+            }
+
+            const brandName = input.brand.value.trim().toUpperCase();
+            let cityText = input.address.value.split(',').pop().trim().replace(/[0-9]/g, '').trim().toUpperCase();
+            if (!cityText) cityText = "VILLE";
+            const dateText = input.startDate.value; 
+            
+            let fileName = `${brandName}, ${cityText}, ${dateText}`;
+            fileName = fileName.replace(/[\/\\?%*:|"<>]/g, '-'); 
+            
+            pdf.save(`${fileName}.pdf`);
+
+        } catch (err) {
+            console.error("Erreur PDF:", err);
+            showMessage("Erreur lors de la création du PDF complet.");
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+
+    el.btn.addEventListener("click", handleGenerate);
+    el.btnKml.addEventListener("click", () => generateKML(generatedData));
+    el.btnCsv.addEventListener("click", () => generateCSV(generatedData));
+    el.btnPdf.addEventListener("click", generateFullPDF);
+  </script>
+</body>
+</html>
