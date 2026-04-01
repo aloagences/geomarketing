@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Planificateur Géomarketing Expert - Interface Premium (Groq Powered)</title>
+  <title>Planificateur Géomarketing Expert - Interface Premium</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Icônes -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -81,9 +81,8 @@
       <div class="absolute bottom-0 right-0 w-48 h-48 bg-white opacity-5 rounded-full translate-x-1/4 translate-y-1/4"></div>
 
       <div class="relative z-10 flex flex-col items-center">
-        <div class="mb-4 bg-white/10 p-3 rounded-full backdrop-blur-sm flex items-center justify-center gap-3 px-6">
-          <i data-lucide="zap" class="w-8 h-8 text-amber-400"></i>
-          <span class="font-bold tracking-widest text-sm text-blue-200 uppercase">Propulsé par Groq IA</span>
+        <div class="mb-4 bg-white/10 p-3 rounded-full backdrop-blur-sm">
+          <i data-lucide="crosshair" class="w-10 h-10 text-white"></i>
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route & exports PDF Premium</p>
@@ -100,6 +99,60 @@
     <main>
       <section id="inputSection" class="transition-all duration-500">
         
+        <!-- Configuration API Visible (Nécessaire pour GitHub Pages/Externe) -->
+        <div class="card p-5 mb-6 bg-blue-50 border-2 border-blue-200">
+          <div class="flex flex-col md:flex-row items-start md:items-center gap-4">
+            <div class="bg-blue-100 p-3 rounded-full hidden md:block">
+              <i data-lucide="key" class="w-6 h-6 text-blue-600"></i>
+            </div>
+            <div class="flex-1 w-full">
+              <h3 class="font-bold text-blue-900 text-lg">Authentification IA Requise</h3>
+              <p class="text-sm text-blue-700 mb-3">
+                Pour faire fonctionner le générateur sur votre propre hébergement, veuillez saisir votre clé API Google Gemini. 
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="inline-flex items-center font-bold text-blue-800 hover:text-blue-900 underline ml-1">
+                  Obtenir une clé gratuitement ici
+                </a>.
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-1 flex items-center cursor-pointer hover:text-blue-900">
+                    <input type="radio" name="aiEngine" value="gemini" checked class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
+                    Clé API Gemini (Principale)
+                  </label>
+                  <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="password" id="apiKeyInput" class="input-style text-sm border-blue-300 flex-1" placeholder="AIzaSy..." />
+                    <select id="modelSelect" class="input-style text-sm border-blue-300 w-full sm:w-auto bg-white py-2 px-3">
+                      <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro (Perf Max)</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rapide)</option>
+                      <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                      <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                      <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                    </select>
+                    <button id="validateKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
+                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                    </button>
+                  </div>
+                  <p id="keyStatusText" class="text-xs mt-1 hidden"></p>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-1 flex items-center cursor-pointer hover:text-blue-900">
+                    <input type="radio" name="aiEngine" value="groq" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
+                    Clé API Groq (Alternative)
+                  </label>
+                  <div class="flex gap-2">
+                    <input type="password" id="groqKeyInput" class="input-style text-sm border-blue-300 flex-1" placeholder="gsk_..." />
+                    <button id="validateGroqKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
+                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                    </button>
+                  </div>
+                  <p id="groqKeyStatusText" class="text-xs mt-1 hidden"></p>
+                </div>
+              </div>
+              <p class="text-[10px] text-blue-600 mt-2 font-medium italic">Vos clés sont sauvegardées localement de façon sécurisée dans votre navigateur.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Configuration API cachée -->
         <div class="card p-4 mb-6 bg-white border-l-4 border-gray-300">
           <details>
@@ -126,10 +179,6 @@
                   <div class="p-3 bg-red-50 text-red-800 text-xs rounded border border-red-200">
                     <i data-lucide="shopping-basket" class="inline w-3 h-3 mr-1"></i> <b>API Marchés :</b> Extraction prioritaire des forains
                   </div>
-              </div>
-              <div class="pt-4 border-t mt-2">
-                <label class="block text-xs font-bold text-red-500 uppercase mb-1">Clé API Groq (Obligatoire)</label>
-                <input type="password" id="groqKeyInput" class="input-style text-sm border-red-200" value="" placeholder="Collez votre clé gsk_... ici (Sauvegardée sur votre navigateur)" />
               </div>
             </div>
           </details>
@@ -272,7 +321,7 @@
           </div>
         </div>
 
-        <!-- ESTIMATION REACH -->
+        <!-- ESTIMATION REACH (Style PDF) -->
         <div id="reachEstimationContainer" class="card overflow-hidden mt-8 hidden bg-[#0E2C59] text-white relative">
             <div class="bg-[#0b2247] px-8 py-4 flex justify-between items-center">
                 <div class="flex flex-col">
@@ -343,11 +392,11 @@
   </div>
 
   <script>
-    // --- CONFIGURATION SÉCURISÉE (GROQ UNIQUEMENT) ---
-    // LAISSEZ LE CHAMP VIDE SUR GITHUB : les clés doivent être collées dans l'interface par l'utilisateur.
+    // --- CONFIGURATION ---
     const DEFAULT_CONFIG = {
+      geminiApiKey: "",
       groqApiKey: "",
-      model: "llama-3.3-70b-versatile"
+      model: "gemini-2.5-pro"
     };
 
     lucide.createIcons();
@@ -378,7 +427,13 @@
       attendanceGrid: document.getElementById("attendanceGrid"),
       displayBrand: document.getElementById("displayBrand"),
       dateSpan: document.getElementById("generationDate"),
+      keyInput: document.getElementById("apiKeyInput"),
+      modelSelect: document.getElementById("modelSelect"),
+      validateKeyBtn: document.getElementById("validateKeyBtn"),
+      keyStatusText: document.getElementById("keyStatusText"),
       groqKeyInput: document.getElementById("groqKeyInput"),
+      validateGroqKeyBtn: document.getElementById("validateGroqKeyBtn"),
+      groqKeyStatusText: document.getElementById("groqKeyStatusText"),
       mapContainer: document.getElementById("mapContainerWrapper"),
       mapStats: document.getElementById("mapStats"),
       
@@ -422,20 +477,36 @@
     input.startDate.valueAsDate = tomorrow;
 
     function loadSavedKeys() {
+      const savedGemini = localStorage.getItem("gemini_api_key");
       const savedGroq = localStorage.getItem("groq_api_key");
+      const savedModel = localStorage.getItem("gemini_model");
+      const savedEngine = localStorage.getItem("active_ai_engine");
+      
+      if (savedGemini) el.keyInput.value = savedGemini;
       if (savedGroq) el.groqKeyInput.value = savedGroq;
+      if (savedModel && el.modelSelect) el.modelSelect.value = savedModel;
+      
+      if (savedEngine) {
+          const radio = document.querySelector(`input[name="aiEngine"][value="${savedEngine}"]`);
+          if (radio) radio.checked = true;
+      }
     }
     loadSavedKeys();
 
     function getKeys() {
       return { 
-        groq: el.groqKeyInput.value.trim() || DEFAULT_CONFIG.groqApiKey
+        gemini: el.keyInput.value.trim() || DEFAULT_CONFIG.geminiApiKey,
+        groq: el.groqKeyInput.value.trim() || DEFAULT_CONFIG.groqApiKey,
+        activeEngine: document.querySelector('input[name="aiEngine"]:checked')?.value || "gemini"
       };
     }
 
     function saveKeys() {
       const keys = getKeys();
+      if (keys.gemini && keys.gemini !== DEFAULT_CONFIG.geminiApiKey) localStorage.setItem("gemini_api_key", keys.gemini);
       if (keys.groq && keys.groq !== DEFAULT_CONFIG.groqApiKey) localStorage.setItem("groq_api_key", keys.groq);
+      if (el.modelSelect) localStorage.setItem("gemini_model", el.modelSelect.value);
+      localStorage.setItem("active_ai_engine", keys.activeEngine);
     }
 
     function showMessage(msg, type = "error") {
@@ -681,16 +752,47 @@
         } catch (e) { return []; }
     }
 
-    // --- MOTEUR GROQ IA ---
+    async function callGeminiAPI(apiKey, prompt, systemInstruction) {
+      const selectedModel = el.modelSelect ? el.modelSelect.value : DEFAULT_CONFIG.model;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+      const body = { 
+          contents: [{ parts: [{ text: prompt }] }], 
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          generationConfig: { responseMimeType: "application/json" }
+      };
+      
+      const delays = [1000, 2000, 4000];
+      let lastError;
+
+      for (let i = 0; i <= delays.length; i++) {
+          try {
+              const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+              if (!res.ok) {
+                  const errData = await res.json().catch(() => ({}));
+                  throw new Error(errData.error?.message || `Erreur serveur Gemini (${res.status})`);
+              }
+              const data = await res.json();
+              if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("L'IA a renvoyé une réponse vide.");
+              return data.candidates[0].content.parts[0].text;
+          } catch (e) {
+              lastError = e;
+              if (i < delays.length) await new Promise(resolve => setTimeout(resolve, delays[i]));
+          }
+      }
+      throw new Error("Gemini: " + (lastError?.message || "Erreur inconnue"));
+    }
+
     async function callGroqAPI(apiKey, prompt, systemInstruction) {
-      const url = `https://api.groq.com/openai/v1/chat/completions`;
+      const url = "https://api.groq.com/openai/v1/chat/completions";
+      // Utilisation de llama-3.3-70b-versatile, excellent pour le géomarketing et le JSON complexe
       const body = {
-          model: DEFAULT_CONFIG.model,
+          model: "llama-3.3-70b-versatile",
           messages: [
-              { role: "system", content: systemInstruction + "\nIMPORTANT: Tu dois renvoyer UNIQUEMENT un objet JSON valide." },
+              { role: "system", content: systemInstruction },
               { role: "user", content: prompt }
           ],
-          response_format: { type: "json_object" }
+          response_format: { type: "json_object" },
+          temperature: 0.2
       };
 
       const delays = [1000, 2000, 4000];
@@ -701,29 +803,35 @@
               const res = await fetch(url, {
                   method: "POST",
                   headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${apiKey}`
+                      "Authorization": `Bearer ${apiKey}`,
+                      "Content-Type": "application/json"
                   },
                   body: JSON.stringify(body)
               });
               if (!res.ok) {
                   const errData = await res.json().catch(() => ({}));
-                  const errMsg = errData.error?.message || "";
-                  if (res.status === 401 || errMsg.includes("API Key")) {
-                      throw new Error("La clé API Groq est invalide ou absente. Veuillez vérifier votre configuration.");
-                  }
-                  throw new Error(errMsg || `Erreur serveur Groq (${res.status})`);
+                  throw new Error(errData.error?.message || `Erreur serveur Groq (${res.status})`);
               }
               const data = await res.json();
-              if (!data?.choices?.[0]?.message?.content) throw new Error("L'IA a renvoyé une réponse vide.");
+              if (!data?.choices?.[0]?.message?.content) throw new Error("Groq a renvoyé une réponse vide.");
               return data.choices[0].message.content;
           } catch (e) {
               lastError = e;
-              if (e.message.includes("invalide ou absente")) throw e;
               if (i < delays.length) await new Promise(resolve => setTimeout(resolve, delays[i]));
           }
       }
       throw new Error("Groq: " + (lastError?.message || "Erreur inconnue"));
+    }
+
+    async function callActiveAI(prompt, systemInstruction) {
+      const keys = getKeys();
+      if (keys.activeEngine === "groq") {
+          if (!keys.groq) throw new Error("Veuillez renseigner votre clé API Groq pour utiliser ce moteur.");
+          return await callGroqAPI(keys.groq, prompt, systemInstruction);
+      } else {
+          if (!keys.gemini) throw new Error("Veuillez renseigner votre clé API Gemini pour utiliser ce moteur.");
+          return await callGeminiAPI(keys.gemini, prompt, systemInstruction);
+      }
     }
 
     function cleanJson(text) {
@@ -741,11 +849,99 @@
         const prompt = `Identifie les 3 principaux concurrents physiques directs de l'enseigne "${brand}" en France. Renvoie UNIQUEMENT un objet JSON valide avec la clé "competitors" contenant une chaîne de caractères (les noms séparés par des virgules). Exemple: {"competitors": "Aldi, Carrefour, Leclerc"}. Si la marque est inconnue ou introuvable, renvoie {"competitors": ""}.`;
         
         try {
-            const raw = await callGroqAPI(keys.groq, prompt, sys);
+            const raw = await callActiveAI(prompt, sys);
             const data = JSON.parse(cleanJson(raw));
             return data.competitors || "";
         } catch(e) {
             return "";
+        }
+    }
+
+    // --- VALIDATION CLE API ---
+    async function handleValidateKey() {
+        const key = el.keyInput.value.trim();
+        if (!key) {
+            el.keyStatusText.textContent = "Veuillez d'abord saisir une clé.";
+            el.keyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
+            return;
+        }
+
+        el.validateKeyBtn.disabled = true;
+        el.validateKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
+        lucide.createIcons();
+        el.keyStatusText.className = "hidden";
+
+        try {
+            // Requête très légère pour tester la connectivité
+            const testPrompt = "Réponds uniquement par le mot 'OK'.";
+            await callGeminiAPI(key, testPrompt, "Tu es un assistant de test.");
+            
+            el.keyStatusText.textContent = "Clé API valide et fonctionnelle avec ce modèle !";
+            el.keyStatusText.className = "text-xs mt-1 text-emerald-600 font-bold block";
+            el.keyInput.classList.remove("border-blue-300", "border-red-500");
+            el.keyInput.classList.add("border-emerald-500", "bg-emerald-50");
+            saveKeys(); 
+        } catch (err) {
+            let errorMsg = err.message || "Non autorisée";
+            // On affiche l'erreur brute pour mieux comprendre le blocage
+            el.keyStatusText.textContent = "Erreur Google API : " + errorMsg;
+            el.keyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
+            el.keyInput.classList.remove("border-blue-300", "border-emerald-500", "bg-emerald-50");
+            el.keyInput.classList.add("border-red-500");
+        } finally {
+            el.validateKeyBtn.disabled = false;
+            el.validateKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
+            lucide.createIcons();
+        }
+    }
+
+    async function handleValidateGroqKey() {
+        const key = el.groqKeyInput.value.trim();
+        if (!key) {
+            el.groqKeyStatusText.textContent = "Veuillez d'abord saisir une clé.";
+            el.groqKeyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
+            return;
+        }
+
+        el.validateGroqKeyBtn.disabled = true;
+        el.validateGroqKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
+        lucide.createIcons();
+        el.groqKeyStatusText.className = "hidden";
+
+        try {
+            // Requête légère vers l'API Groq (OpenAI compatible)
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${key}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "llama-3.1-8b-instant", // Nouveau modèle rapide et supporté pour le test
+                    messages: [{ role: "user", "content": "Test" }],
+                    max_tokens: 5
+                })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error?.message || `Erreur serveur (${response.status})`);
+            }
+            
+            el.groqKeyStatusText.textContent = "Clé API Groq valide et fonctionnelle !";
+            el.groqKeyStatusText.className = "text-xs mt-1 text-emerald-600 font-bold block";
+            el.groqKeyInput.classList.remove("border-blue-300", "border-red-500");
+            el.groqKeyInput.classList.add("border-emerald-500", "bg-emerald-50");
+            saveKeys(); 
+        } catch (err) {
+            el.groqKeyStatusText.textContent = "Erreur API Groq : " + err.message;
+            el.groqKeyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
+            el.groqKeyInput.classList.remove("border-blue-300", "border-emerald-500", "bg-emerald-50");
+            el.groqKeyInput.classList.add("border-red-500");
+        } finally {
+            el.validateGroqKeyBtn.disabled = false;
+            el.validateGroqKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
+            lucide.createIcons();
         }
     }
 
@@ -756,8 +952,11 @@
       if (!input.brand.value.trim() || !input.address.value.trim()) return showMessage("Remplissez l'enseigne et la ville.");
       
       const keys = getKeys();
-      if (!keys.groq || keys.groq.trim() === "") {
-          return showMessage("⚠️ Accès refusé : Aucune clé API Groq détectée. Ouvrez le panneau 'Configuration technique' en haut de page et collez votre clé Groq personnelle.");
+      if (keys.activeEngine === "gemini" && !keys.gemini) {
+          return showMessage("Veuillez renseigner votre clé API Gemini dans l'encadré d'authentification en haut de la page.");
+      }
+      if (keys.activeEngine === "groq" && !keys.groq) {
+          return showMessage("Veuillez renseigner votre clé API Groq dans l'encadré d'authentification en haut de la page.");
       }
 
       try {
@@ -817,8 +1016,8 @@
         }
 
         if (!input.competitors.value.trim()) {
-            setProgress(`Détection par l'IA Groq des concurrents de "${officialBrand}"...`, 35);
-            const autoComps = await getCompetitorsFromAI(officialBrand, keys);
+            setProgress(`Détection par l'IA des concurrents de "${officialBrand}"...`, 35);
+            const autoComps = await getCompetitorsFromAI(officialBrand, getKeys());
             if (autoComps && autoComps.toLowerCase() !== "vide" && autoComps.toLowerCase() !== "inconnu") {
                 input.competitors.value = autoComps;
                 input.competitors.classList.add("bg-emerald-50", "border-emerald-500", "text-emerald-900");
@@ -912,7 +1111,7 @@
             ? `INTERDICTION ABSOLUE : ne place AUCUN arrêt dans : ${excludedStr.toUpperCase()}.`
             : `RÈGLE : Ne traverse PAS les fleuves majeurs.`;
 
-        setProgress(`Analyse IA Stratégique par Groq...`, 60);
+        setProgress(`Analyse IA Stratégique...`, 60);
         el.displayBrand.textContent = officialBrand;
         el.dateSpan.textContent = new Date().toLocaleDateString('fr-FR');
         
@@ -944,9 +1143,9 @@
 
         let rawText = "";
         try {
-           rawText = await callGroqAPI(keys.groq, prompt, systemInstruction);
+           rawText = await callActiveAI(prompt, systemInstruction);
         } catch(e) {
-           throw new Error(`${e.message}`);
+           throw new Error(`Serveurs IA indisponibles : ${e.message}`);
         }
         
         let data;
@@ -957,7 +1156,7 @@
                 data.attendance = datesList.map(d => ({ date: d, startMatin: mornStart, endMatin: mornEnd, startAprem: aftStart, endAprem: aftEnd }));
             }
         } catch (jsonError) {
-            throw new Error(`L'IA Groq a échoué à formater la réponse correctement.`);
+            throw new Error(`L'IA a échoué à formater la réponse.`);
         }
         
         data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name }; 
@@ -1069,7 +1268,7 @@
                             stop.locationName = "Point de chute QG";
                             stop.address = originObj.display_name;
                         }
-                        stop.source = "GÉNÉRATION (ADRESSE RÉELLE)";
+                        stop.source = "GÉNÉRATION (ZONE RÉSIDENTIELLE)";
                     }
                 }
             }
@@ -1528,6 +1727,8 @@
     }
 
     el.btn.addEventListener("click", handleGenerate);
+    if (el.validateKeyBtn) el.validateKeyBtn.addEventListener("click", handleValidateKey);
+    if (el.validateGroqKeyBtn) el.validateGroqKeyBtn.addEventListener("click", handleValidateGroqKey);
     el.btnKml.addEventListener("click", () => generateKML(generatedData));
     el.btnCsv.addEventListener("click", () => generateCSV(generatedData));
     el.btnPdf.addEventListener("click", generateFullPDF);
