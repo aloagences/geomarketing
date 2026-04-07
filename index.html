@@ -81,8 +81,9 @@
       <div class="absolute bottom-0 right-0 w-48 h-48 bg-white opacity-5 rounded-full translate-x-1/4 translate-y-1/4"></div>
 
       <div class="relative z-10 flex flex-col items-center">
-        <div class="mb-4 bg-white/10 p-3 rounded-full backdrop-blur-sm">
-          <i data-lucide="crosshair" class="w-10 h-10 text-white"></i>
+        <!-- Logo Intégré -->
+        <div class="mb-6 flex items-center justify-center select-none">
+          <span class="font-extrabold text-[70px] leading-none tracking-tighter text-white">àlo</span>
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route & exports PDF Premium</p>
@@ -99,58 +100,117 @@
     <main>
       <section id="inputSection" class="transition-all duration-500">
         
-        <!-- Configuration API Visible (Nécessaire pour GitHub Pages/Externe) -->
-        <div class="card p-5 mb-6 bg-blue-50 border-2 border-blue-200">
-          <div class="flex flex-col md:flex-row items-start md:items-center gap-4">
-            <div class="bg-blue-100 p-3 rounded-full hidden md:block">
-              <i data-lucide="key" class="w-6 h-6 text-blue-600"></i>
-            </div>
-            <div class="flex-1 w-full">
-              <h3 class="font-bold text-blue-900 text-lg">Authentification IA Requise</h3>
-              <p class="text-sm text-blue-700 mb-3">
-                Pour faire fonctionner le générateur sur votre propre hébergement, veuillez saisir votre clé API Google Gemini. 
-                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="inline-flex items-center font-bold text-blue-800 hover:text-blue-900 underline ml-1">
-                  Obtenir une clé gratuitement ici
-                </a>.
-              </p>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Configuration API Visible -->
+        <div class="card mb-6 bg-blue-50 border-2 border-blue-200 overflow-hidden transition-all duration-300 shadow-sm hover:shadow">
+          <details id="aiConfigDetails" open class="group">
+            <summary class="p-5 cursor-pointer flex items-center justify-between select-none hover:bg-blue-100/50 transition-colors">
+              <div class="flex items-center gap-4">
+                <div class="bg-blue-100 p-3 rounded-full hidden md:flex items-center justify-center group-open:bg-blue-200 transition-colors">
+                  <i data-lucide="cpu" class="w-6 h-6 text-blue-600"></i>
+                </div>
                 <div>
-                  <label class="block text-xs font-bold text-blue-800 uppercase mb-1 flex items-center cursor-pointer hover:text-blue-900">
-                    <input type="radio" name="aiEngine" value="gemini" checked class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
-                    Clé API Gemini (Principale)
+                  <h3 class="font-bold text-blue-900 text-lg flex items-center gap-2 flex-wrap">
+                    Moteur d'Intelligence Artificielle
+                    <span id="activeAiBadge" class="bg-blue-600 text-white text-[10px] px-2 py-1 rounded-full uppercase tracking-wider font-bold shadow-sm">OpenRouter</span>
+                  </h3>
+                  <p class="text-sm text-blue-700 mt-1 group-open:hidden">Cliquez pour modifier le moteur ou renseigner une clé API.</p>
+                  <p class="text-sm text-blue-700 mt-1 hidden group-open:block">Sélectionnez l'IA de votre choix pour générer le plan. Les clés sont sauvegardées.</p>
+                </div>
+              </div>
+              <div class="bg-blue-200 p-2 rounded-full text-blue-700 group-open:rotate-180 transition-transform duration-300 ml-4 flex-shrink-0">
+                 <i data-lucide="chevron-down" class="w-5 h-5"></i>
+              </div>
+            </summary>
+            
+            <div class="px-5 pb-5 pt-2 border-t border-blue-200 bg-white/40">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
+                
+                <!-- OpenRouter -->
+                <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm relative overflow-hidden">
+                  <div class="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg">100% GRATUIT</div>
+                  <label class="block text-xs font-bold text-emerald-700 uppercase mb-2 flex items-center cursor-pointer hover:text-emerald-800">
+                    <input type="radio" name="aiEngine" value="openrouter" checked class="mr-2 w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"> 
+                    OpenRouter (Recommandé)
+                  </label>
+                  <div class="flex gap-2">
+                    <input type="password" id="openrouterKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="sk-or-v1-..." />
+                    <button id="validateOpenRouterKeyBtn" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
+                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                    </button>
+                  </div>
+                  <p id="openrouterKeyStatusText" class="text-xs mt-1 hidden"></p>
+                  <p class="text-[10px] text-gray-500 mt-1.5 leading-tight"><a href="https://openrouter.ai/keys" target="_blank" class="text-blue-600 underline font-semibold">Obtenir une clé ici</a>. Contourne le blocage européen de Google.</p>
+                </div>
+
+                <!-- Google Gemini -->
+                <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-2 flex items-center cursor-pointer hover:text-blue-900">
+                    <input type="radio" name="aiEngine" value="gemini" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
+                    Google Gemini
                   </label>
                   <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="password" id="apiKeyInput" class="input-style text-sm border-blue-300 flex-1" placeholder="AIzaSy..." />
-                    <select id="modelSelect" class="input-style text-sm border-blue-300 w-full sm:w-auto bg-white py-2 px-3">
-                      <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro (Perf Max)</option>
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rapide)</option>
+                    <input type="password" id="apiKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="AIzaSy..." />
+                    <select id="modelSelect" class="input-style text-sm border-gray-200 w-full sm:w-auto bg-white py-2 px-3">
+                      <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                       <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                      <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                      <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                     </select>
                     <button id="validateKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
                       <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
                     </button>
                   </div>
                   <p id="keyStatusText" class="text-xs mt-1 hidden"></p>
+                  <p class="text-[10px] text-gray-500 mt-1.5">Nécessite une CB (Facturation) en Europe.</p>
                 </div>
-                <div>
-                  <label class="block text-xs font-bold text-blue-800 uppercase mb-1 flex items-center cursor-pointer hover:text-blue-900">
+
+                <!-- Groq -->
+                <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-2 flex items-center cursor-pointer hover:text-blue-900">
                     <input type="radio" name="aiEngine" value="groq" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
-                    Clé API Groq (Alternative)
+                    Groq (Ultra Rapide)
                   </label>
                   <div class="flex gap-2">
-                    <input type="password" id="groqKeyInput" class="input-style text-sm border-blue-300 flex-1" placeholder="gsk_..." />
+                    <input type="password" id="groqKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="gsk_..." />
                     <button id="validateGroqKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
                       <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
                     </button>
                   </div>
                   <p id="groqKeyStatusText" class="text-xs mt-1 hidden"></p>
                 </div>
+                
+                <!-- OpenAI -->
+                <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-2 flex items-center cursor-pointer hover:text-blue-900">
+                    <input type="radio" name="aiEngine" value="openai" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
+                    OpenAI (ChatGPT)
+                  </label>
+                  <div class="flex gap-2">
+                    <input type="password" id="openaiKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="sk-proj-..." />
+                    <button id="validateOpenAIKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
+                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                    </button>
+                  </div>
+                  <p id="openaiKeyStatusText" class="text-xs mt-1 hidden"></p>
+                </div>
+
+                <!-- Mistral -->
+                <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm md:col-span-2">
+                  <label class="block text-xs font-bold text-blue-800 uppercase mb-2 flex items-center cursor-pointer hover:text-blue-900">
+                    <input type="radio" name="aiEngine" value="mistral" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"> 
+                    Mistral AI (Europe)
+                  </label>
+                  <div class="flex gap-2">
+                    <input type="password" id="mistralKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="Renseignez votre clé Mistral..." />
+                    <button id="validateMistralKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
+                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                    </button>
+                  </div>
+                  <p id="mistralKeyStatusText" class="text-xs mt-1 hidden"></p>
+                </div>
+
               </div>
-              <p class="text-[10px] text-blue-600 mt-2 font-medium italic">Vos clés sont sauvegardées localement de façon sécurisée dans votre navigateur.</p>
             </div>
-          </div>
+          </details>
         </div>
 
         <!-- Configuration API cachée -->
@@ -263,7 +323,7 @@
             
             <ul class="text-xs text-blue-200 mb-6 space-y-3 relative z-10">
                 <li class="flex"><i data-lucide="compass" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Stratégie Cardinale (Nord, Sud, Est, Ouest)</span></li>
-                <li class="flex"><i data-lucide="graduation-cap" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Écoles primaires régulées (Lun,Mar,Jeu,Ven à 11h15/16h15)</span></li>
+                <li class="flex"><i data-lucide="graduation-cap" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Écoles strictes (Lun,Mar,Jeu,Ven à 11h15 et 16h15)</span></li>
                 <li class="flex"><i data-lucide="map-pin" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>60% d'arrêts Intra-Muros (- de 2km)</span></li>
                 <li class="flex"><i data-lucide="target" class="w-4 h-4 text-emerald-400 mr-2 flex-shrink-0"></i> <span>Auto-Détection IA des Concurrents Directs</span></li>
             </ul>
@@ -391,11 +451,41 @@
     </main>
   </div>
 
+  <!-- Export PDF: Page de Garde Premium (Cachée) -->
+  <div id="pdfCoverPage" class="fixed top-[-9999px] left-[-9999px] bg-white text-[#0E2C59] overflow-hidden" style="width: 1122px; height: 794px; font-family: 'Montserrat', sans-serif; box-sizing: border-box; z-index: -1; position: relative;">
+      
+      <!-- Image de fond personnalisée (Votre Design) -->
+      <img src="https://i.ibb.co/9316Hhdf/Plan-de-circulation-LIDL-pdf-1.png" crossorigin="anonymous" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0;" />
+      
+      <!-- Contenu texte superposé (Généré dynamiquement par l'outil) -->
+      <div style="position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 80px; box-sizing: border-box; color: #0E2C59;">
+          <div>
+              <h1 style="font-size: 65px; font-weight: 400; line-height: 1.1; margin: 0;">Plan de</h1>
+              <h1 style="font-size: 75px; font-weight: 800; line-height: 1.1; margin: 0; text-transform: uppercase;">circulation</h1>
+          </div>
+          <div>
+              <h2 id="coverBrand" style="font-size: 90px; font-weight: 800; margin: 0; line-height: 1.1; color: #0E2C59; text-transform: uppercase;">MARQUE</h2>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+              <div>
+                  <div style="font-size: 40px; font-weight: 800; margin-bottom: 15px;">àlo</div>
+                  <div id="coverAddress" style="font-size: 22px; color: #0E2C59; font-weight: 500; max-width: 700px; line-height: 1.5; text-transform: uppercase;">ADRESSE</div>
+              </div>
+              <div style="font-size: 18px; color: #0E2C59; font-weight: 600;">
+                  we are mixed culture®
+              </div>
+          </div>
+      </div>
+  </div>
+
   <script>
     // --- CONFIGURATION ---
     const DEFAULT_CONFIG = {
       geminiApiKey: "",
       groqApiKey: "",
+      openaiApiKey: "",
+      mistralApiKey: "",
+      openrouterApiKey: "",
       model: "gemini-2.5-pro"
     };
 
@@ -418,6 +508,10 @@
       alertBox: document.getElementById("alertBox"),
       alertText: document.getElementById("alertText"),
       alertIcon: document.getElementById("alertIcon"),
+      
+      aiConfigDetails: document.getElementById("aiConfigDetails"),
+      activeAiBadge: document.getElementById("activeAiBadge"),
+      
       outputContainer: document.getElementById("analysisOutputContainer"),
       analysisCard: document.getElementById("clientAnalysisOutput"),
       analysisText: document.getElementById("clientAnalysisText"),
@@ -427,13 +521,28 @@
       attendanceGrid: document.getElementById("attendanceGrid"),
       displayBrand: document.getElementById("displayBrand"),
       dateSpan: document.getElementById("generationDate"),
+      
       keyInput: document.getElementById("apiKeyInput"),
       modelSelect: document.getElementById("modelSelect"),
       validateKeyBtn: document.getElementById("validateKeyBtn"),
       keyStatusText: document.getElementById("keyStatusText"),
+      
       groqKeyInput: document.getElementById("groqKeyInput"),
       validateGroqKeyBtn: document.getElementById("validateGroqKeyBtn"),
       groqKeyStatusText: document.getElementById("groqKeyStatusText"),
+
+      openaiKeyInput: document.getElementById("openaiKeyInput"),
+      validateOpenAIKeyBtn: document.getElementById("validateOpenAIKeyBtn"),
+      openaiKeyStatusText: document.getElementById("openaiKeyStatusText"),
+
+      mistralKeyInput: document.getElementById("mistralKeyInput"),
+      validateMistralKeyBtn: document.getElementById("validateMistralKeyBtn"),
+      mistralKeyStatusText: document.getElementById("mistralKeyStatusText"),
+
+      openrouterKeyInput: document.getElementById("openrouterKeyInput"),
+      validateOpenRouterKeyBtn: document.getElementById("validateOpenRouterKeyBtn"),
+      openrouterKeyStatusText: document.getElementById("openrouterKeyStatusText"),
+
       mapContainer: document.getElementById("mapContainerWrapper"),
       mapStats: document.getElementById("mapStats"),
       
@@ -479,25 +588,59 @@
     function loadSavedKeys() {
       const savedGemini = localStorage.getItem("gemini_api_key");
       const savedGroq = localStorage.getItem("groq_api_key");
+      const savedOpenai = localStorage.getItem("openai_api_key");
+      const savedMistral = localStorage.getItem("mistral_api_key");
+      const savedOpenRouter = localStorage.getItem("openrouter_api_key");
       const savedModel = localStorage.getItem("gemini_model");
-      const savedEngine = localStorage.getItem("active_ai_engine");
+      const savedEngine = localStorage.getItem("active_ai_engine") || "openrouter"; 
       
       if (savedGemini) el.keyInput.value = savedGemini;
       if (savedGroq) el.groqKeyInput.value = savedGroq;
+      if (savedOpenai && el.openaiKeyInput) el.openaiKeyInput.value = savedOpenai;
+      if (savedMistral && el.mistralKeyInput) el.mistralKeyInput.value = savedMistral;
+      if (savedOpenRouter && el.openrouterKeyInput) el.openrouterKeyInput.value = savedOpenRouter;
       if (savedModel && el.modelSelect) el.modelSelect.value = savedModel;
       
       if (savedEngine) {
           const radio = document.querySelector(`input[name="aiEngine"][value="${savedEngine}"]`);
           if (radio) radio.checked = true;
       }
+      
+      updateAiBadge();
+      autoCloseAiSettings();
+
+      document.querySelectorAll('input[name="aiEngine"]').forEach(radio => {
+          radio.addEventListener('change', () => {
+              updateAiBadge();
+              saveKeys();
+          });
+      });
     }
+
+    function updateAiBadge() {
+        const engine = document.querySelector('input[name="aiEngine"]:checked')?.value || "openrouter";
+        if (!el.activeAiBadge) return;
+        const names = { 'openrouter': 'OpenRouter', 'gemini': 'Google Gemini', 'groq': 'Groq', 'openai': 'OpenAI', 'mistral': 'Mistral AI' };
+        el.activeAiBadge.textContent = names[engine] || engine;
+    }
+
+    function autoCloseAiSettings() {
+        const keys = getKeys();
+        if (keys[keys.activeEngine] && el.aiConfigDetails) {
+            el.aiConfigDetails.removeAttribute('open');
+        }
+    }
+
     loadSavedKeys();
 
     function getKeys() {
       return { 
         gemini: el.keyInput.value.trim() || DEFAULT_CONFIG.geminiApiKey,
         groq: el.groqKeyInput.value.trim() || DEFAULT_CONFIG.groqApiKey,
-        activeEngine: document.querySelector('input[name="aiEngine"]:checked')?.value || "gemini"
+        openai: el.openaiKeyInput ? el.openaiKeyInput.value.trim() : DEFAULT_CONFIG.openaiApiKey,
+        mistral: el.mistralKeyInput ? el.mistralKeyInput.value.trim() : DEFAULT_CONFIG.mistralApiKey,
+        openrouter: el.openrouterKeyInput ? el.openrouterKeyInput.value.trim() : DEFAULT_CONFIG.openrouterApiKey,
+        activeEngine: document.querySelector('input[name="aiEngine"]:checked')?.value || "openrouter"
       };
     }
 
@@ -505,6 +648,10 @@
       const keys = getKeys();
       if (keys.gemini && keys.gemini !== DEFAULT_CONFIG.geminiApiKey) localStorage.setItem("gemini_api_key", keys.gemini);
       if (keys.groq && keys.groq !== DEFAULT_CONFIG.groqApiKey) localStorage.setItem("groq_api_key", keys.groq);
+      if (keys.openai && keys.openai !== DEFAULT_CONFIG.openaiApiKey) localStorage.setItem("openai_api_key", keys.openai);
+      if (keys.mistral && keys.mistral !== DEFAULT_CONFIG.mistralApiKey) localStorage.setItem("mistral_api_key", keys.mistral);
+      if (keys.openrouter && keys.openrouter !== DEFAULT_CONFIG.openrouterApiKey) localStorage.setItem("openrouter_api_key", keys.openrouter);
+      
       if (el.modelSelect) localStorage.setItem("gemini_model", el.modelSelect.value);
       localStorage.setItem("active_ai_engine", keys.activeEngine);
     }
@@ -784,7 +931,6 @@
 
     async function callGroqAPI(apiKey, prompt, systemInstruction) {
       const url = "https://api.groq.com/openai/v1/chat/completions";
-      // Utilisation de llama-3.3-70b-versatile, excellent pour le géomarketing et le JSON complexe
       const body = {
           model: "llama-3.3-70b-versatile",
           messages: [
@@ -802,10 +948,7 @@
           try {
               const res = await fetch(url, {
                   method: "POST",
-                  headers: {
-                      "Authorization": `Bearer ${apiKey}`,
-                      "Content-Type": "application/json"
-                  },
+                  headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
                   body: JSON.stringify(body)
               });
               if (!res.ok) {
@@ -823,11 +966,120 @@
       throw new Error("Groq: " + (lastError?.message || "Erreur inconnue"));
     }
 
+    async function callOpenAIAPI(apiKey, prompt, systemInstruction) {
+      const url = "https://api.openai.com/v1/chat/completions";
+      const body = {
+          model: "gpt-4o",
+          messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2
+      };
+
+      const res = await fetch(url, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error?.message || `Erreur serveur OpenAI (${res.status})`);
+      }
+      const data = await res.json();
+      return data.choices[0].message.content;
+    }
+
+    async function callMistralAPI(apiKey, prompt, systemInstruction) {
+      const url = "https://api.mistral.ai/v1/chat/completions";
+      const body = {
+          model: "mistral-large-latest",
+          messages: [
+              { role: "system", content: systemInstruction },
+              { role: "user", content: prompt }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2
+      };
+
+      const res = await fetch(url, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || errData.error?.message || `Erreur serveur Mistral (${res.status})`);
+      }
+      const data = await res.json();
+      return data.choices[0].message.content;
+    }
+
+    async function callOpenRouterAPI(apiKey, prompt, systemInstruction) {
+      const url = "https://openrouter.ai/api/v1/chat/completions";
+      const freeModelsFallback = [
+          "meta-llama/llama-3.3-70b-instruct:free",
+          "qwen/qwen-2.5-72b-instruct:free",
+          "mistralai/mistral-nemo:free",
+          "google/gemini-2.0-flash-thinking-exp:free"
+      ];
+
+      let lastError;
+
+      for (const modelId of freeModelsFallback) {
+          const body = {
+              model: modelId, 
+              messages: [
+                  { role: "system", content: systemInstruction },
+                  { role: "user", content: prompt }
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.2
+          };
+
+          try {
+              const res = await fetch(url, {
+                  method: "POST",
+                  headers: { 
+                      "Authorization": `Bearer ${apiKey}`, 
+                      "Content-Type": "application/json",
+                      "HTTP-Referer": "https://alo-geomarketing.fr",
+                      "X-Title": "Planificateur Géomarketing"
+                  },
+                  body: JSON.stringify(body)
+              });
+              if (!res.ok) {
+                  const errData = await res.json().catch(() => ({}));
+                  throw new Error(errData.error?.message || `Erreur OpenRouter (${res.status})`);
+              }
+              const data = await res.json();
+              if (!data?.choices?.[0]?.message?.content) throw new Error("Réponse vide.");
+              
+              return data.choices[0].message.content;
+          } catch (e) {
+              lastError = e;
+              await new Promise(resolve => setTimeout(resolve, 500)); 
+          }
+      }
+      
+      throw new Error("Serveurs gratuits saturés. Détail : " + (lastError?.message || "Erreur inconnue"));
+    }
+
     async function callActiveAI(prompt, systemInstruction) {
       const keys = getKeys();
       if (keys.activeEngine === "groq") {
           if (!keys.groq) throw new Error("Veuillez renseigner votre clé API Groq pour utiliser ce moteur.");
           return await callGroqAPI(keys.groq, prompt, systemInstruction);
+      } else if (keys.activeEngine === "openai") {
+          if (!keys.openai) throw new Error("Veuillez renseigner votre clé API OpenAI pour utiliser ce moteur.");
+          return await callOpenAIAPI(keys.openai, prompt, systemInstruction);
+      } else if (keys.activeEngine === "mistral") {
+          if (!keys.mistral) throw new Error("Veuillez renseigner votre clé API Mistral pour utiliser ce moteur.");
+          return await callMistralAPI(keys.mistral, prompt, systemInstruction);
+      } else if (keys.activeEngine === "openrouter") {
+          if (!keys.openrouter) throw new Error("Veuillez renseigner votre clé API OpenRouter pour utiliser ce moteur gratuit.");
+          return await callOpenRouterAPI(keys.openrouter, prompt, systemInstruction);
       } else {
           if (!keys.gemini) throw new Error("Veuillez renseigner votre clé API Gemini pour utiliser ce moteur.");
           return await callGeminiAPI(keys.gemini, prompt, systemInstruction);
@@ -858,13 +1110,21 @@
     }
 
     // --- VALIDATION CLE API ---
+
+    function showKeyStatus(element, text, color, inputEl) {
+        element.textContent = text;
+        element.className = `text-xs mt-1 text-${color}-600 font-bold block`;
+        inputEl.classList.remove("border-gray-200", "border-red-500", "border-emerald-500", "bg-emerald-50");
+        if (color === "emerald") {
+            inputEl.classList.add("border-emerald-500", "bg-emerald-50");
+        } else {
+            inputEl.classList.add("border-red-500");
+        }
+    }
+
     async function handleValidateKey() {
         const key = el.keyInput.value.trim();
-        if (!key) {
-            el.keyStatusText.textContent = "Veuillez d'abord saisir une clé.";
-            el.keyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
-            return;
-        }
+        if (!key) return showKeyStatus(el.keyStatusText, "Veuillez d'abord saisir une clé.", "red", el.keyInput);
 
         el.validateKeyBtn.disabled = true;
         el.validateKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
@@ -872,22 +1132,13 @@
         el.keyStatusText.className = "hidden";
 
         try {
-            // Requête très légère pour tester la connectivité
-            const testPrompt = "Réponds uniquement par le mot 'OK'.";
+            const testPrompt = "Réponds uniquement par 'OK'.";
             await callGeminiAPI(key, testPrompt, "Tu es un assistant de test.");
-            
-            el.keyStatusText.textContent = "Clé API valide et fonctionnelle avec ce modèle !";
-            el.keyStatusText.className = "text-xs mt-1 text-emerald-600 font-bold block";
-            el.keyInput.classList.remove("border-blue-300", "border-red-500");
-            el.keyInput.classList.add("border-emerald-500", "bg-emerald-50");
+            showKeyStatus(el.keyStatusText, "Clé API valide avec ce modèle !", "emerald", el.keyInput);
             saveKeys(); 
+            setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
         } catch (err) {
-            let errorMsg = err.message || "Non autorisée";
-            // On affiche l'erreur brute pour mieux comprendre le blocage
-            el.keyStatusText.textContent = "Erreur Google API : " + errorMsg;
-            el.keyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
-            el.keyInput.classList.remove("border-blue-300", "border-emerald-500", "bg-emerald-50");
-            el.keyInput.classList.add("border-red-500");
+            showKeyStatus(el.keyStatusText, "Erreur Google API : " + (err.message || "Non autorisée"), "red", el.keyInput);
         } finally {
             el.validateKeyBtn.disabled = false;
             el.validateKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
@@ -897,11 +1148,7 @@
 
     async function handleValidateGroqKey() {
         const key = el.groqKeyInput.value.trim();
-        if (!key) {
-            el.groqKeyStatusText.textContent = "Veuillez d'abord saisir une clé.";
-            el.groqKeyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
-            return;
-        }
+        if (!key) return showKeyStatus(el.groqKeyStatusText, "Veuillez d'abord saisir une clé.", "red", el.groqKeyInput);
 
         el.validateGroqKeyBtn.disabled = true;
         el.validateGroqKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
@@ -909,41 +1156,144 @@
         el.groqKeyStatusText.className = "hidden";
 
         try {
-            // Requête légère vers l'API Groq (OpenAI compatible)
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${key}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    model: "llama-3.1-8b-instant", // Nouveau modèle rapide et supporté pour le test
-                    messages: [{ role: "user", "content": "Test" }],
-                    max_tokens: 5
-                })
+                headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "Test" }], max_tokens: 5 })
             });
 
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                throw new Error(errData.error?.message || `Erreur serveur (${response.status})`);
-            }
+            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error?.message || "Erreur serveur");
             
-            el.groqKeyStatusText.textContent = "Clé API Groq valide et fonctionnelle !";
-            el.groqKeyStatusText.className = "text-xs mt-1 text-emerald-600 font-bold block";
-            el.groqKeyInput.classList.remove("border-blue-300", "border-red-500");
-            el.groqKeyInput.classList.add("border-emerald-500", "bg-emerald-50");
+            showKeyStatus(el.groqKeyStatusText, "Clé API Groq valide !", "emerald", el.groqKeyInput);
             saveKeys(); 
+            setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
         } catch (err) {
-            el.groqKeyStatusText.textContent = "Erreur API Groq : " + err.message;
-            el.groqKeyStatusText.className = "text-xs mt-1 text-red-600 font-bold block";
-            el.groqKeyInput.classList.remove("border-blue-300", "border-emerald-500", "bg-emerald-50");
-            el.groqKeyInput.classList.add("border-red-500");
+            showKeyStatus(el.groqKeyStatusText, "Erreur API Groq : " + err.message, "red", el.groqKeyInput);
         } finally {
             el.validateGroqKeyBtn.disabled = false;
             el.validateGroqKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
             lucide.createIcons();
         }
     }
+
+    async function handleValidateOpenAIKey() {
+        const key = el.openaiKeyInput.value.trim();
+        if (!key) return showKeyStatus(el.openaiKeyStatusText, "Veuillez saisir une clé OpenAI.", "red", el.openaiKeyInput);
+
+        el.validateOpenAIKeyBtn.disabled = true;
+        el.validateOpenAIKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
+        lucide.createIcons();
+        el.openaiKeyStatusText.className = "hidden";
+
+        try {
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: "Test" }], max_tokens: 5 })
+            });
+
+            if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error?.message || "Erreur OpenAI");
+            
+            showKeyStatus(el.openaiKeyStatusText, "Clé OpenAI valide !", "emerald", el.openaiKeyInput);
+            saveKeys(); 
+            setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
+        } catch (err) {
+            showKeyStatus(el.openaiKeyStatusText, "Erreur OpenAI : " + err.message, "red", el.openaiKeyInput);
+        } finally {
+            el.validateOpenAIKeyBtn.disabled = false;
+            el.validateOpenAIKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
+            lucide.createIcons();
+        }
+    }
+
+    async function handleValidateMistralKey() {
+        const key = el.mistralKeyInput.value.trim();
+        if (!key) return showKeyStatus(el.mistralKeyStatusText, "Veuillez saisir une clé Mistral.", "red", el.mistralKeyInput);
+
+        el.validateMistralKeyBtn.disabled = true;
+        el.validateMistralKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
+        lucide.createIcons();
+        el.mistralKeyStatusText.className = "hidden";
+
+        try {
+            const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ model: "mistral-small-latest", messages: [{ role: "user", content: "Test" }], max_tokens: 5 })
+            });
+
+            if (!response.ok) throw new Error((await response.json().catch(()=>({}))).message || "Erreur Mistral");
+            
+            showKeyStatus(el.mistralKeyStatusText, "Clé Mistral valide !", "emerald", el.mistralKeyInput);
+            saveKeys(); 
+            setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
+        } catch (err) {
+            showKeyStatus(el.mistralKeyStatusText, "Erreur Mistral : " + err.message, "red", el.mistralKeyInput);
+        } finally {
+            el.validateMistralKeyBtn.disabled = false;
+            el.validateMistralKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
+            lucide.createIcons();
+        }
+    }
+
+    async function handleValidateOpenRouterKey() {
+        const key = el.openrouterKeyInput.value.trim();
+        if (!key) return showKeyStatus(el.openrouterKeyStatusText, "Veuillez saisir une clé OpenRouter.", "red", el.openrouterKeyInput);
+
+        el.validateOpenRouterKeyBtn.disabled = true;
+        el.validateOpenRouterKeyBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 mr-1 animate-spin"></i> Test...';
+        lucide.createIcons();
+        el.openrouterKeyStatusText.className = "hidden";
+
+        const freeModelsFallback = [
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "qwen/qwen-2.5-72b-instruct:free",
+            "mistralai/mistral-nemo:free"
+        ];
+        
+        let success = false;
+        let usedModel = "";
+        let lastErr = "";
+
+        for (const modelId of freeModelsFallback) {
+            try {
+                const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: { 
+                        "Authorization": `Bearer ${key}`, 
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://alo-geomarketing.fr",
+                        "X-Title": "Planificateur Géomarketing"
+                    },
+                    body: JSON.stringify({ model: modelId, messages: [{ role: "user", content: "Test" }], max_tokens: 5 })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(()=>({}));
+                    throw new Error(errData.error?.message || "Erreur OpenRouter");
+                }
+                
+                success = true;
+                usedModel = modelId.split('/')[1].split(':')[0]; 
+                break; 
+            } catch (err) {
+                lastErr = err.message;
+            }
+        }
+
+        if (success) {
+            showKeyStatus(el.openrouterKeyStatusText, `Clé valide ! (Connecté via ${usedModel})`, "emerald", el.openrouterKeyInput);
+            saveKeys(); 
+            setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
+        } else {
+            showKeyStatus(el.openrouterKeyStatusText, "Serveurs gratuits saturés : " + lastErr, "red", el.openrouterKeyInput);
+        }
+
+        el.validateOpenRouterKeyBtn.disabled = false;
+        el.validateOpenRouterKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
+        lucide.createIcons();
+    }
+
 
     // --- GENERATION MAIN ---
 
@@ -953,10 +1303,19 @@
       
       const keys = getKeys();
       if (keys.activeEngine === "gemini" && !keys.gemini) {
-          return showMessage("Veuillez renseigner votre clé API Gemini dans l'encadré d'authentification en haut de la page.");
+          return showMessage("Veuillez renseigner votre clé API Gemini dans l'encadré d'authentification.");
       }
       if (keys.activeEngine === "groq" && !keys.groq) {
-          return showMessage("Veuillez renseigner votre clé API Groq dans l'encadré d'authentification en haut de la page.");
+          return showMessage("Veuillez renseigner votre clé API Groq dans l'encadré d'authentification.");
+      }
+      if (keys.activeEngine === "openai" && !keys.openai) {
+          return showMessage("Veuillez renseigner votre clé API OpenAI dans l'encadré d'authentification.");
+      }
+      if (keys.activeEngine === "mistral" && !keys.mistral) {
+          return showMessage("Veuillez renseigner votre clé API Mistral dans l'encadré d'authentification.");
+      }
+      if (keys.activeEngine === "openrouter" && !keys.openrouter) {
+          return showMessage("Veuillez renseigner votre clé API OpenRouter dans l'encadré d'authentification.");
       }
 
       try {
@@ -1124,6 +1483,7 @@
             ? `MÉTÉO PRÉVUE J1 : ${weatherInfo}. Adapte ta stratégie si le risque de pluie est fort (privilégie les lieux couverts).` 
             : "";
 
+        // PROMPT RENFORCÉ POUR LES ÉCOLES
         const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
         RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
         ${exclusionInstruction}
@@ -1131,9 +1491,12 @@
         STRATÉGIE CARDINALE: Attribue à chaque jour une direction cardinale dominante (Nord, Sud, Est, Ouest).
         PROXIMITÉ: 60% des arrêts DOIVENT être dans la ville "${targetCity}" ET à moins de 2.0 km.
         HORAIRES: 4 le matin, 4 l'après-midi.
-        RÈGLE DE RÉPARTITION: Priorise ABSOLUMENT les Marchés Forains ET les Concurrents. Complète le reste du planning avec un mix : Transports et Rues Commerçantes.
-        RÈGLE DES ÉCOLES (CRITIQUE): Réduis le nombre d'écoles (Max 1 par jour). Les lieux de type "school" (Sorties Scolaires) NE PEUVENT ÊTRE PLACÉS QUE LES Lundi, Mardi, Jeudi, Vendredi. LEUR HORAIRE DOIT ÊTRE EXACTEMENT "11:15" ou "16:15" (peu importe les créneaux par défaut). INTERDICTION ABSOLUE de placer une école le mercredi, samedi ou dimanche.
-        VERIFICATION DES JOURS (CRITIQUE): Pour les MARCHÉS FORAINS, croise ABSOLUMENT le jour de la semaine ("day") avec les "hours" fournies ou tes connaissances de la ville. NE PLACE UN MARCHÉ QUE SI TU SAIS QU'IL A LIEU CE JOUR-LÀ.
+        RÈGLES DE PLACEMENT (CRITIQUE) :
+        1. MARCHÉS FORAINS : Croise le jour de la semaine ("day") avec les "hours" fournies. Ne place un marché que s'il est ouvert ce jour-là.
+        2. ÉCOLES ("type": "school") - TRÈS STRICT :
+           - JOURS AUTORISÉS : EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi.
+           - JOURS INTERDITS : Mercredi, Samedi, Dimanche (0 école autorisée ces jours-là).
+           - FORMAT OBLIGATOIRE : Pour les jours autorisés, place EXACTEMENT UNE école le matin à "11:15" ET EXACTEMENT UNE école l'après-midi à "16:15". N'utilise JAMAIS d'autres horaires pour les écoles.
         ${competitorInstruction}
         ANTI-DOUBLON: Aucune adresse répétée.
         ANTI-HALLUCINATION: Piocher 100% des arrêts dans la BASE OSM. N'invente RIEN.
@@ -1160,6 +1523,50 @@
         }
         
         data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name }; 
+
+        // GARDE-FOU JAVASCRIPT (SÉCURITÉ 100%)
+        // Vérifie de force les écoles renvoyées par l'IA et écrase les erreurs
+        data.dailyPlans.forEach(dayPlan => {
+            const dayStr = (dayPlan.day || "").toLowerCase();
+            const isSchoolDay = dayStr.includes("lundi") || dayStr.includes("mardi") || dayStr.includes("jeudi") || dayStr.includes("vendredi");
+            
+            if (dayPlan.stops) {
+                let morningSchoolFound = false;
+                let afternoonSchoolFound = false;
+
+                dayPlan.stops.forEach(stop => {
+                    const nameLower = (stop.locationName || "").toLowerCase();
+                    // On vérifie le type MAIS AUSSI le nom généré par l'IA au cas où
+                    const isSchool = stop.type === 'school' || nameLower.includes('ecole') || nameLower.includes('école') || nameLower.includes('scolaire');
+
+                    if (isSchool) {
+                        if (!isSchoolDay) {
+                            // C'est un mercredi/we, on transforme l'école en point résidentiel
+                            stop.type = 'other';
+                            stop.locationName = "Secteur Résidentiel (Correction auto)";
+                            stop.address = stop.address.replace(/Sortie Scolaire : /gi, "");
+                        } else {
+                            // C'est un bon jour, on force le type et les horaires
+                            stop.type = 'school';
+                            const hour = parseInt(stop.time.split(':')[0]);
+                            if (hour < 14 && !morningSchoolFound) {
+                                stop.time = "11:15";
+                                morningSchoolFound = true;
+                            } else if (hour >= 14 && !afternoonSchoolFound) {
+                                stop.time = "16:15";
+                                afternoonSchoolFound = true;
+                            } else {
+                                // Il a mis trop d'écoles, on transforme le surplus
+                                stop.type = 'other';
+                                stop.locationName = "Secteur Résidentiel (Correction auto)";
+                                stop.address = stop.address.replace(/Sortie Scolaire : /gi, "");
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
 
         setProgress("Correction Topographique...", 75);
         let availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors];
@@ -1226,6 +1633,11 @@
                 if (!isLegit) {
                     if (availablePOIs.length > 0) {
                         let fallbackIndex = availablePOIs.findIndex(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()));
+                        
+                        if (fallbackIndex === -1) {
+                            // SÉCURITÉ : On empêche l'algorithme de piocher une école par hasard pour boucher un trou
+                            fallbackIndex = availablePOIs.findIndex(p => p.type !== 'school');
+                        }
                         if (fallbackIndex === -1) fallbackIndex = 0; 
                         
                         const fallbackPOI = availablePOIs[fallbackIndex];
@@ -1273,6 +1685,39 @@
                 }
             }
         }
+
+        // DOUBLE SÉCURITÉ JAVASCRIPT (Post-Topographie)
+        // Nettoie définitivement les écoles qui auraient pu être "happées" par le correcteur géographique
+        data.dailyPlans.forEach(dayPlan => {
+            const dayStr = (dayPlan.day || "").toLowerCase();
+            const isSchoolDay = dayStr.includes("lundi") || dayStr.includes("mardi") || dayStr.includes("jeudi") || dayStr.includes("vendredi");
+            
+            if (dayPlan.stops) {
+                let morningSchoolFound = false;
+                let afternoonSchoolFound = false;
+
+                dayPlan.stops.forEach(stop => {
+                    if (stop.type === 'school') {
+                        if (!isSchoolDay) {
+                            stop.type = 'other';
+                            stop.locationName = "Secteur Résidentiel (Sécurité Finale)";
+                        } else {
+                            const hour = parseInt(stop.time.split(':')[0]);
+                            if (hour < 14 && !morningSchoolFound) {
+                                stop.time = "11:15";
+                                morningSchoolFound = true;
+                            } else if (hour >= 14 && !afternoonSchoolFound) {
+                                stop.time = "16:15";
+                                afternoonSchoolFound = true;
+                            } else {
+                                stop.type = 'other';
+                                stop.locationName = "Secteur Résidentiel (Sécurité Finale)";
+                            }
+                        }
+                    }
+                });
+            }
+        });
 
         setProgress("Calcul de l'itinéraire routier (OSRM)...", 85);
         
@@ -1451,8 +1896,6 @@
         
         mapInstance.invalidateSize();
 
-        L.circle([origin.lat, origin.lng], { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.05, radius: radiusKm * 1000 }).addTo(markersLayer);
-
         const qgIcon = L.divIcon({ className: 'custom-div-icon', html: `<div style="background-color:#0E2C59; width:20px; height:20px; border-radius:50%; border:3px solid white; box-shadow:0 0 6px rgba(0,0,0,0.4);"></div>`, iconSize: [20,20], iconAnchor: [10,10] });
         L.marker([origin.lat, origin.lng], {icon: qgIcon}).addTo(markersLayer).bindPopup(`<b>QG / Départ</b><br>${origin.display_name}`).openPopup();
 
@@ -1603,29 +2046,21 @@
                 addFooter(isFullBlue);
             };
 
-            // 1. PAGE DE COUVERTURE
-            pdf.setFillColor(14, 44, 89); 
-            pdf.rect(0, 0, pageWidth, pageHeight, 'F');
+            // 1. PAGE DE COUVERTURE (Rendu HTML Parfait)
+            const coverBrandEl = document.getElementById('coverBrand');
+            const coverAddressEl = document.getElementById('coverAddress');
+            if (coverBrandEl) coverBrandEl.textContent = input.brand.value.trim();
+            if (coverAddressEl) coverAddressEl.textContent = input.address.value.trim();
+
+            const coverElement = document.getElementById('pdfCoverPage');
+            const coverCanvas = await html2canvas(coverElement, { 
+                scale: 2, 
+                useCORS: true, 
+                backgroundColor: '#ffffff' 
+            });
             
-            pdf.setTextColor(255, 255, 255);
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(45);
-            pdf.text("Plan de", 25, 60);
-            pdf.setFont("helvetica", "bold");
-            pdf.text("circulation", 25, 78);
-
-            pdf.setFontSize(55);
-            pdf.text(input.brand.value.toUpperCase(), 25, 120);
-
-            pdf.setFontSize(24);
-            pdf.text("àlo", 25, pageHeight - 40);
-
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(14);
-            pdf.setTextColor(180, 200, 230);
-            const addressText = input.address.value.toUpperCase();
-            const splitAddress = pdf.splitTextToSize(addressText, 120);
-            pdf.text(splitAddress, 25, pageHeight - 25);
+            // Ajout de l'image de la page de couverture en plein écran (sans marges)
+            pdf.addImage(coverCanvas.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, pageWidth, pageHeight);
 
             // 2. PAGE REACH
             await captureAndAdd('reachEstimationContainer', true);
@@ -1729,6 +2164,10 @@
     el.btn.addEventListener("click", handleGenerate);
     if (el.validateKeyBtn) el.validateKeyBtn.addEventListener("click", handleValidateKey);
     if (el.validateGroqKeyBtn) el.validateGroqKeyBtn.addEventListener("click", handleValidateGroqKey);
+    if (el.validateOpenAIKeyBtn) el.validateOpenAIKeyBtn.addEventListener("click", handleValidateOpenAIKey);
+    if (el.validateMistralKeyBtn) el.validateMistralKeyBtn.addEventListener("click", handleValidateMistralKey);
+    if (el.validateOpenRouterKeyBtn) el.validateOpenRouterKeyBtn.addEventListener("click", handleValidateOpenRouterKey);
+    
     el.btnKml.addEventListener("click", () => generateKML(generatedData));
     el.btnCsv.addEventListener("click", () => generateCSV(generatedData));
     el.btnPdf.addEventListener("click", generateFullPDF);
