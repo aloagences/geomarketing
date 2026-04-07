@@ -231,13 +231,10 @@
                     <i data-lucide="school" class="inline w-3 h-3 mr-1"></i> <b>Éduc. Nationale :</b> API Vacances Scolaires
                   </div>
                   <div class="p-3 bg-green-50 text-green-800 text-xs rounded border border-green-200">
-                    <i data-lucide="map" class="inline w-3 h-3 mr-1"></i> <b>OSM & OSRM :</b> Topographie & Distances de Route
+                    <i data-lucide="map" class="w-3 h-3 mr-1"></i> <b>OSM & OSRM :</b> Topographie & Distances de Route
                   </div>
-                  <div class="p-3 bg-amber-50 text-amber-800 text-xs rounded border border-amber-200 md:col-span-2">
-                    <i data-lucide="cloud-rain" class="inline w-3 h-3 mr-1"></i> <b>Open-Meteo :</b> Contexte météo envoyé à l'IA
-                  </div>
-                  <div class="p-3 bg-red-50 text-red-800 text-xs rounded border border-red-200">
-                    <i data-lucide="shopping-basket" class="inline w-3 h-3 mr-1"></i> <b>API Marchés :</b> Extraction prioritaire des forains
+                  <div class="p-3 bg-red-50 text-red-800 text-xs rounded border border-red-200 md:col-span-2">
+                    <i data-lucide="shopping-basket" class="w-3 h-3 mr-1"></i> <b>API Marchés :</b> Extraction prioritaire des forains
                   </div>
               </div>
             </div>
@@ -365,7 +362,6 @@
                <span id="badgeSiren" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 hidden"><i data-lucide="building" class="w-3.5 h-3.5 mr-1"></i> SIREN: <span id="sirenVal" class="ml-1"></span></span>
                <span id="badgeInsee" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200 hidden"><i data-lucide="map" class="w-3.5 h-3.5 mr-1"></i> INSEE: <span id="inseeVal" class="ml-1"></span></span>
                <span id="badgePop" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 hidden"><i data-lucide="users" class="w-3.5 h-3.5 mr-1"></i> Pop: <span id="popVal" class="ml-1"></span></span>
-               <span id="badgeWeather" class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 hidden"><i data-lucide="cloud-rain" class="w-3.5 h-3.5 mr-1"></i> Météo: <span id="weatherVal" class="ml-1"></span></span>
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -550,11 +546,9 @@
       badgeSiren: document.getElementById("badgeSiren"),
       badgeInsee: document.getElementById("badgeInsee"),
       badgePop: document.getElementById("badgePop"),
-      badgeWeather: document.getElementById("badgeWeather"),
       sirenVal: document.getElementById("sirenVal"),
       inseeVal: document.getElementById("inseeVal"),
       popVal: document.getElementById("popVal"),
-      weatherVal: document.getElementById("weatherVal"),
 
       reachEstimationContainer: document.getElementById("reachEstimationContainer"),
       estTotalStops: document.getElementById("estTotalStops"),
@@ -706,20 +700,6 @@
             }
         } catch(e) {}
         return calculateDistance(lat1, lng1, lat2, lng2); 
-    }
-
-    async function fetchWeather(lat, lng, startDate) {
-        try {
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FParis&start_date=${startDate}&end_date=${startDate}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            if (data && data.daily) {
-                const tmax = data.daily.temperature_2m_max[0];
-                const rain = data.daily.precipitation_probability_max[0];
-                return `Max ${tmax}°C, Pluie ${rain}%`;
-            }
-        } catch(e) {}
-        return "Donnée indisponible";
     }
 
     async function fetchPopulation(inseeCode) {
@@ -1222,13 +1202,17 @@
                 body: JSON.stringify({ model: "mistral-small-latest", messages: [{ role: "user", content: "Test" }], max_tokens: 5 })
             });
 
-            if (!response.ok) throw new Error((await response.json().catch(()=>({}))).message || "Erreur Mistral");
+            if (!response.ok) {
+                const errData = await response.json().catch(()=>({}));
+                // Extraction plus précise de l'erreur Mistral
+                throw new Error(errData.error?.message || errData.message || `Code d'erreur HTTP ${response.status}`);
+            }
             
             showKeyStatus(el.mistralKeyStatusText, "Clé Mistral valide !", "emerald", el.mistralKeyInput);
             saveKeys(); 
             setTimeout(() => { if(el.aiConfigDetails) el.aiConfigDetails.removeAttribute('open'); }, 800);
         } catch (err) {
-            showKeyStatus(el.mistralKeyStatusText, "Erreur Mistral : " + err.message, "red", el.mistralKeyInput);
+            showKeyStatus(el.mistralKeyStatusText, "Détail du blocage : " + err.message, "red", el.mistralKeyInput);
         } finally {
             el.validateMistralKeyBtn.disabled = false;
             el.validateMistralKeyBtn.innerHTML = '<i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier';
@@ -1329,7 +1313,6 @@
         el.badgeSiren.classList.add("hidden");
         el.badgeInsee.classList.add("hidden");
         el.badgePop.classList.add("hidden");
-        el.badgeWeather.classList.add("hidden");
         el.analysisCard.classList.add("hidden");
         
         let officialBrand = input.brand.value;
@@ -1350,13 +1333,7 @@
             }
         }
 
-        setProgress("Analyse Météorologique (Open-Meteo)...", 25);
         const startDateStr = input.startDate.value; 
-        const weatherInfo = await fetchWeather(originObj.lat, originObj.lng, startDateStr);
-        el.weatherVal.textContent = weatherInfo;
-        el.badgeWeather.classList.remove("hidden");
-        el.officialBadges.classList.remove("hidden");
-
         const startDateObj = new Date(startDateStr);
         let datesList = [];
         for(let i=0; i<parseInt(input.duration.value); i++) {
@@ -1479,18 +1456,14 @@
         const aftStart = input.afternoon.value.split('-')[0] ? input.afternoon.value.split('-')[0].trim() : "14:00";
         const aftEnd = input.afternoon.value.split('-')[1] ? input.afternoon.value.split('-')[1].trim() : "18:00";
 
-        const weatherContext = weatherInfo !== "Donnée indisponible" 
-            ? `MÉTÉO PRÉVUE J1 : ${weatherInfo}. Adapte ta stratégie si le risque de pluie est fort (privilégie les lieux couverts).` 
-            : "";
-
-        // PROMPT RENFORCÉ POUR LES ÉCOLES
+        // PROMPT RENFORCÉ POUR LES ÉCOLES ET LES VIDES
         const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
         RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
         ${exclusionInstruction}
-        ${weatherContext}
         STRATÉGIE CARDINALE: Attribue à chaque jour une direction cardinale dominante (Nord, Sud, Est, Ouest).
         PROXIMITÉ: 60% des arrêts DOIVENT être dans la ville "${targetCity}" ET à moins de 2.0 km.
-        HORAIRES: 4 le matin, 4 l'après-midi.
+        HORAIRES OBLIGATOIRES: EXACTEMENT 4 arrêts le matin, EXACTEMENT 4 arrêts l'après-midi pour chaque jour.
+        GARDE-FOU ABSOLU: Si tu manques de points d'intérêt (écoles, marchés, etc.) pour respecter les règles, complète OBLIGATOIREMENT les trous avec des lieux nommés "Secteur Résidentiel" (type: "other") pour toujours garantir 8 arrêts par jour. UN JOUR NE DOIT JAMAIS ÊTRE VIDE.
         RÈGLES DE PLACEMENT (CRITIQUE) :
         1. MARCHÉS FORAINS : Croise le jour de la semaine ("day") avec les "hours" fournies. Ne place un marché que s'il est ouvert ce jour-là.
         2. ÉCOLES ("type": "school") - TRÈS STRICT :
@@ -1499,7 +1472,7 @@
            - FORMAT OBLIGATOIRE : Pour les jours autorisés, place EXACTEMENT UNE école le matin à "11:15" ET EXACTEMENT UNE école l'après-midi à "16:15". N'utilise JAMAIS d'autres horaires pour les écoles.
         ${competitorInstruction}
         ANTI-DOUBLON: Aucune adresse répétée.
-        ANTI-HALLUCINATION: Piocher 100% des arrêts dans la BASE OSM. N'invente RIEN.
+        ANTI-HALLUCINATION: Piocher 100% des arrêts dans la BASE OSM. N'invente RIEN (sauf les Secteurs Résidentiels si besoin).
         JSON FORMAT: {"analysis": "Explique la stratégie et le mix", "dailyPlans": [{"day": "lundi JJ/MM/YYYY", "role": "VÉHICULE", "stops": [{"time": "HH:MM", "locationName": "Nom", "address": "Adresse", "type": "market|transport|shopping|school|competitor|other", "source": "OSM", "lat": 0, "lng": 0}]}], "attendance": [{"date": "JJ/MM/YYYY", "startMatin": "${mornStart}", "endMatin": "${mornEnd}", "startAprem": "${aftStart}", "endAprem": "${aftEnd}"}]}`;
 
         const prompt = `Génère le plan pour ${officialBrand} depuis ${input.address.value}. DATES : ${datesList.join(' | ')}. HORAIRES : Matin ${input.morning.value}, Aprem ${input.afternoon.value}. \n\n${poiContext}`;
@@ -1515,11 +1488,17 @@
         try {
             data = JSON.parse(cleanJson(rawText));
             data.dailyPlans = data.dailyPlans || [];
+            
+            // SÉCURITÉ : Empêcher un plan vide de faire planter silencieusement l'interface
+            if (data.dailyPlans.length === 0) {
+                throw new Error("L'algorithme IA a généré un plan vide car les contraintes étaient trop fortes. Veuillez élargir le rayon ou relancer la génération.");
+            }
+
             if(!data.attendance || !Array.isArray(data.attendance) || data.attendance.length === 0) {
                 data.attendance = datesList.map(d => ({ date: d, startMatin: mornStart, endMatin: mornEnd, startAprem: aftStart, endAprem: aftEnd }));
             }
         } catch (jsonError) {
-            throw new Error(`L'IA a échoué à formater la réponse.`);
+            throw new Error(jsonError.message.includes("un plan vide") ? jsonError.message : `L'IA a échoué à formater la réponse correctement.`);
         }
         
         data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name }; 
