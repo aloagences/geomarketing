@@ -660,24 +660,37 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     // --- Garde-fou : forcer la répartition matin/aprem ---
     // Maintenant l'index est fiable (1:1 avec perDayTimes).
+    // Si l'IA n'a pas fourni assez d'arrêts, on crée des placeholders
+    // que la validation topographique remplira avec de vrais POIs.
     const STOPS_PER_SLOT = 4;
+    const makePlaceholder = () => ({
+      time: '00:00', locationName: '', address: '', type: 'other',
+      source: '', lat: 0, lng: 0,
+    });
+
     data.dailyPlans.forEach((dayPlan, idx) => {
       const t = perDayTimes[idx];
-      if (!t || !dayPlan.stops) return;
+      if (!t) return;
+      dayPlan.stops = dayPlan.stops || [];
 
       const allStops = dayPlan.stops;
 
       if (t.hasMorning && t.hasAfternoon) {
+        const needed = STOPS_PER_SLOT * 2;
+        // Compléter si pas assez d'arrêts
+        while (allStops.length < needed) allStops.push(makePlaceholder());
         const mornStops = allStops.slice(0, STOPS_PER_SLOT);
-        const aftStops = allStops.slice(STOPS_PER_SLOT, STOPS_PER_SLOT * 2);
+        const aftStops = allStops.slice(STOPS_PER_SLOT, needed);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
         redistributeStops(aftStops, t.aftStart, t.aftEnd);
         dayPlan.stops = [...mornStops, ...aftStops];
       } else if (t.hasMorning) {
+        while (allStops.length < STOPS_PER_SLOT) allStops.push(makePlaceholder());
         const mornStops = allStops.slice(0, STOPS_PER_SLOT);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
         dayPlan.stops = mornStops;
       } else if (t.hasAfternoon) {
+        while (allStops.length < STOPS_PER_SLOT) allStops.push(makePlaceholder());
         const aftStops = allStops.slice(0, STOPS_PER_SLOT);
         redistributeStops(aftStops, t.aftStart, t.aftEnd);
         dayPlan.stops = aftStops;
