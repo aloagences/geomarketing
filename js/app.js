@@ -723,7 +723,8 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     for (let idx = 0; idx < data.dailyPlans.length; idx++) {
       const day = data.dailyPlans[idx];
-      const att = data.attendance[idx] || { startMatin: morn.start, endMatin: morn.end, startAprem: aft.start, endAprem: aft.end };
+      const fallbackTimes = perDayTimes[idx] || perDayTimes[0];
+      const att = data.attendance[idx] || { hasMorning: fallbackTimes.hasMorning, hasAfternoon: fallbackTimes.hasAfternoon, startMatin: fallbackTimes.mornStart, endMatin: fallbackTimes.mornEnd, startAprem: fallbackTimes.aftStart, endAprem: fallbackTimes.aftEnd };
 
       // Météo du jour
       const dayISO = datesISO[idx];
