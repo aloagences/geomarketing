@@ -705,15 +705,20 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // --- Validation topographique des arrêts ---
     setProgress('Génération des tracés réels...', 75);
     const availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors];
-    const usedPOINames = new Set();
     const defaultComps = ['aldi', 'lidl', 'carrefour', 'store', 'brico', 'castorama', 'leroy'];
     const userCompsList = userCompetitors ? userCompetitors.split(',').map(s => s.trim().toLowerCase()) : [];
     const allCompsToCheck = [...defaultComps, ...userCompsList];
+
+    // Préférer les types utiles pour le chauffeur (commerces, transports)
+    const USEFUL_TYPES = ['market', 'shopping', 'transport', 'competitor', 'sport', 'culture', 'medical'];
 
     for (const day of data.dailyPlans) {
       if (!day.stops) continue;
       const dayStr = (day.day || '').toLowerCase();
       const isSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+
+      // usedPOINames PAR JOUR : permet la réutilisation de POIs entre jours différents
+      const usedThisDay = new Set();
 
       for (const stop of day.stops) {
         stop.locationName = stop.locationName || 'Lieu de prospection';
@@ -746,7 +751,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           const aiName = stop.locationName.toLowerCase().replace(/[^a-z0-9]/g, '');
           const idx = availablePOIs.findIndex(p => {
             const pName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            return !usedPOINames.has(p.name) && (
+            return !usedThisDay.has(p.name) && (
               (aiName.length > 2 && (aiName.includes(pName) || pName.includes(aiName))) ||
               (stop.address && stop.address.toLowerCase().includes(p.address.toLowerCase()))
             );
@@ -757,21 +762,28 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               locationName: real.name, address: real.address,
               lat: real.lat, lng: real.lng, type: real.type, source: 'OSM',
             });
-            usedPOINames.add(real.name);
+            usedThisDay.add(real.name);
             isLegit = true;
           }
         }
 
-        // Fallback intelligent
+        // Fallback intelligent — privilégier commerces et transports
         if (!isLegit && availablePOIs.length > 0) {
           const findFallback = (filter) => availablePOIs.findIndex(p =>
             filter(p) && (isSchoolDay || p.type !== 'school')
           );
 
-          let idx = findFallback(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedPOINames.has(p.name));
-          if (idx === -1) idx = findFallback(p => p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedPOINames.has(p.name));
-          if (idx === -1) idx = findFallback(p => !usedPOINames.has(p.name));
-          if (idx === -1) idx = findFallback(() => true); // réutilisation
+          // 1. Même type, même ville, pas encore utilisé ce jour
+          let idx = findFallback(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedThisDay.has(p.name));
+          // 2. Type utile (commerce/transport), même ville, pas encore ce jour
+          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedThisDay.has(p.name));
+          // 3. Type utile, pas encore ce jour
+          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && !usedThisDay.has(p.name));
+          // 4. N'importe quel POI pas encore utilisé ce jour
+          if (idx === -1) idx = findFallback(p => !usedThisDay.has(p.name));
+          // 5. Réutilisation (même jour) — un commerce connu vaut mieux qu'un point random
+          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type));
+          if (idx === -1) idx = findFallback(() => true);
 
           if (idx !== -1) {
             const fb = availablePOIs[idx];
@@ -780,12 +792,12 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               lat: fb.lat, lng: fb.lng, type: fb.type,
               source: 'CORRECTION (Base OSM)',
             });
-            usedPOINames.add(fb.name);
+            usedThisDay.add(fb.name);
             isLegit = true;
           }
         }
 
-        // Dernier recours : reverse geocoding
+        // Dernier recours — UNIQUEMENT si aucun POI du tout
         if (!isLegit) {
           let validStreet = null, finalLat = originObj.lat, finalLng = originObj.lng;
           for (let attempt = 0; attempt < 5 && !validStreet; attempt++) {
@@ -799,7 +811,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           stop.lng = finalLng;
           if (validStreet) {
             stop.type = 'shopping';
-            stop.locationName = `Secteur à fort passage : ${validStreet.split(',')[0]}`;
+            stop.locationName = `Zone commerciale : ${validStreet.split(',')[0]}`;
             stop.address = validStreet;
           } else {
             stop.type = 'other';
