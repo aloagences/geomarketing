@@ -627,28 +627,32 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name };
 
-    // --- Garde-fou créneaux désactivés + recalage horaire ---
+    // --- Garde-fou : forcer la répartition matin/aprem ---
+    // Ne PAS se fier aux heures de l'IA. Forcer 4 arrêts par créneau actif.
+    const STOPS_PER_SLOT = 4;
     data.dailyPlans.forEach((dayPlan, idx) => {
       const t = perDayTimes[idx];
       if (!t || !dayPlan.stops) return;
 
-      // Supprimer les arrêts hors créneaux actifs
-      dayPlan.stops = dayPlan.stops.filter(stop => {
-        const hour = parseInt((stop.time || '12:00').split(':')[0]);
-        if (!t.hasMorning && hour < 14) return false;
-        if (!t.hasAfternoon && hour >= 14) return false;
-        return true;
-      });
+      const allStops = dayPlan.stops;
 
-      // Recaler les horaires des arrêts dans les plages réelles
-      const mornStops = dayPlan.stops.filter(s => parseInt(s.time.split(':')[0]) < 14);
-      const aftStops = dayPlan.stops.filter(s => parseInt(s.time.split(':')[0]) >= 14);
-
-      if (t.hasMorning && mornStops.length > 0) {
+      if (t.hasMorning && t.hasAfternoon) {
+        // Forcer : premiers 4 → matin, suivants 4 → après-midi
+        const mornStops = allStops.slice(0, STOPS_PER_SLOT);
+        const aftStops = allStops.slice(STOPS_PER_SLOT, STOPS_PER_SLOT * 2);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
-      }
-      if (t.hasAfternoon && aftStops.length > 0) {
         redistributeStops(aftStops, t.aftStart, t.aftEnd);
+        dayPlan.stops = [...mornStops, ...aftStops];
+      } else if (t.hasMorning) {
+        const mornStops = allStops.slice(0, STOPS_PER_SLOT);
+        redistributeStops(mornStops, t.mornStart, t.mornEnd);
+        dayPlan.stops = mornStops;
+      } else if (t.hasAfternoon) {
+        const aftStops = allStops.slice(0, STOPS_PER_SLOT);
+        redistributeStops(aftStops, t.aftStart, t.aftEnd);
+        dayPlan.stops = aftStops;
+      } else {
+        dayPlan.stops = [];
       }
     });
 
@@ -914,6 +918,15 @@ function rebuildPerDaySchedule() {
     return;
   }
 
+  // Sauvegarder les valeurs personnalisées existantes AVANT de reconstruire
+  const saved = {};
+  for (let i = 0; i < 31; i++) {
+    const m = document.getElementById(`perDay_morn_${i}`);
+    const a = document.getElementById(`perDay_aft_${i}`);
+    if (m) saved[`morn_${i}`] = m.value;
+    if (a) saved[`aft_${i}`] = a.value;
+  }
+
   const defaultMorn = inputRefs.morning?.value || '10:00 - 13:00';
   const defaultAft = inputRefs.afternoon?.value || '14:00 - 18:00';
   const startObj = new Date(startDate);
@@ -924,6 +937,10 @@ function rebuildPerDaySchedule() {
     d.setDate(d.getDate() + i);
     const dayLabel = d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit' });
 
+    // Garder la valeur perso si elle existe, sinon utiliser le défaut
+    const mornVal = (saved[`morn_${i}`] !== undefined) ? saved[`morn_${i}`] : defaultMorn;
+    const aftVal = (saved[`aft_${i}`] !== undefined) ? saved[`aft_${i}`] : defaultAft;
+
     html += `
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-2 rounded-lg bg-white border border-indigo-100">
         <span class="text-sm font-bold text-indigo-900 capitalize min-w-[140px]">${sanitize(dayLabel)}</span>
@@ -931,12 +948,12 @@ function rebuildPerDaySchedule() {
           <div class="flex items-center gap-1">
             <i data-lucide="sun" class="w-3 h-3 text-amber-500 flex-shrink-0"></i>
             <input type="text" class="input-style text-xs py-1.5 px-2 w-[130px]"
-                   id="perDay_morn_${i}" value="${sanitize(defaultMorn)}" placeholder="Vide = pas de matin" />
+                   id="perDay_morn_${i}" value="${sanitize(mornVal)}" placeholder="Vide = pas de matin" />
           </div>
           <div class="flex items-center gap-1">
             <i data-lucide="sunset" class="w-3 h-3 text-orange-500 flex-shrink-0"></i>
             <input type="text" class="input-style text-xs py-1.5 px-2 w-[130px]"
-                   id="perDay_aft_${i}" value="${sanitize(defaultAft)}" placeholder="Vide = pas d'aprem" />
+                   id="perDay_aft_${i}" value="${sanitize(aftVal)}" placeholder="Vide = pas d'aprem" />
           </div>
         </div>
       </div>`;
