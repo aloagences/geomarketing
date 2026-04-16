@@ -889,7 +889,8 @@ function rebuildPerDaySchedule() {
 
 /**
  * Récupère les horaires pour un jour donné (index).
- * Un champ vide = pas de session ce créneau (retourne null pour matin ou après-midi).
+ * Champ vidé volontairement (existe mais vide) = pas de session.
+ * Champ inexistant (section pas ouverte) = horaires par défaut.
  */
 function getTimesForDay(dayIndex) {
   const defaultMorn = parseTimes(inputRefs.morning?.value || '10:00 - 13:00');
@@ -898,23 +899,21 @@ function getTimesForDay(dayIndex) {
   const mornInput = document.getElementById(`perDay_morn_${dayIndex}`);
   const aftInput = document.getElementById(`perDay_aft_${dayIndex}`);
 
-  const mornRaw = mornInput ? mornInput.value.trim() : null;
-  const aftRaw = aftInput ? aftInput.value.trim() : null;
+  // Input inexistant → utiliser les horaires par défaut (les deux créneaux actifs)
+  // Input existant mais vide → créneau désactivé volontairement
+  const hasMorning = mornInput ? mornInput.value.trim() !== '' : true;
+  const hasAfternoon = aftInput ? aftInput.value.trim() !== '' : true;
 
-  // Champ vide ou inexistant → pas de session
-  const hasMorning = mornRaw !== null && mornRaw !== '';
-  const hasAfternoon = aftRaw !== null && aftRaw !== '';
-
-  const morn = hasMorning ? parseTimes(mornRaw) : null;
-  const aft = hasAfternoon ? parseTimes(aftRaw) : null;
+  const morn = hasMorning ? parseTimes(mornInput ? mornInput.value.trim() : inputRefs.morning?.value || '10:00 - 13:00') : null;
+  const aft = hasAfternoon ? parseTimes(aftInput ? aftInput.value.trim() : inputRefs.afternoon?.value || '14:00 - 18:00') : null;
 
   return {
     hasMorning,
     hasAfternoon,
-    mornStart: morn?.start || (hasMorning ? defaultMorn.start : null),
-    mornEnd: morn?.end || (hasMorning ? defaultMorn.end : null),
-    aftStart: aft?.start || (hasAfternoon ? defaultAft.start : null),
-    aftEnd: aft?.end || (hasAfternoon ? defaultAft.end : null),
+    mornStart: morn?.start || defaultMorn.start,
+    mornEnd: morn?.end || defaultMorn.end,
+    aftStart: aft?.start || defaultAft.start,
+    aftEnd: aft?.end || defaultAft.end,
   };
 }
 
