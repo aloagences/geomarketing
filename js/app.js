@@ -358,6 +358,18 @@ function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = []) {
 }
 
 // ========================================
+// EXTRACTION DATE ISO DEPUIS CHAÎNE FR
+// ========================================
+
+/**
+ * Extrait la date ISO (YYYY-MM-DD) d'une chaîne comme "mercredi 29/04/2026".
+ */
+function extractISOFromFrDate(str) {
+  const m = (str || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+}
+
+// ========================================
 // REDISTRIBUTION DES ARRÊTS SUR UNE PLAGE
 // ========================================
 
@@ -582,7 +594,8 @@ RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
 ${exclusionInstruction}
 STRATÉGIE CARDINALE: Attribue à chaque jour une direction dominante (Nord, Sud, Est, Ouest).
 PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
-HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau (ne mets aucun stop).
+JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une par jour, dans l'ordre chronologique. Même les jours sans créneau doivent avoir une entrée avec "stops":[] vide.
+HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
 RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
@@ -627,8 +640,26 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name };
 
+    // --- Normalisation : exactement 1 entrée par date, dans l'ordre ---
+    // L'IA peut sauter des jours, en dupliquer, ou les mettre dans le désordre.
+    // On force le mapping par DATE, pas par index.
+    const plansByISO = {};
+    (data.dailyPlans || []).forEach(dp => {
+      const iso = extractISOFromFrDate(dp.day || '');
+      if (iso && !plansByISO[iso]) {
+        plansByISO[iso] = dp;
+      } else if (iso && plansByISO[iso]) {
+        // Doublon : fusionner les stops
+        plansByISO[iso].stops = [...(plansByISO[iso].stops || []), ...(dp.stops || [])];
+      }
+    });
+
+    data.dailyPlans = datesISO.map((iso, i) => {
+      return plansByISO[iso] || { day: datesList[i], role: 'VÉHICULE', stops: [] };
+    });
+
     // --- Garde-fou : forcer la répartition matin/aprem ---
-    // Ne PAS se fier aux heures de l'IA. Forcer 4 arrêts par créneau actif.
+    // Maintenant l'index est fiable (1:1 avec perDayTimes).
     const STOPS_PER_SLOT = 4;
     data.dailyPlans.forEach((dayPlan, idx) => {
       const t = perDayTimes[idx];
@@ -637,7 +668,6 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       const allStops = dayPlan.stops;
 
       if (t.hasMorning && t.hasAfternoon) {
-        // Forcer : premiers 4 → matin, suivants 4 → après-midi
         const mornStops = allStops.slice(0, STOPS_PER_SLOT);
         const aftStops = allStops.slice(STOPS_PER_SLOT, STOPS_PER_SLOT * 2);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
