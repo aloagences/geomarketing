@@ -315,10 +315,15 @@ function renderSignatureBlock(icon, color, label, start, end) {
 // GARDE-FOUS ÉCOLES
 // ========================================
 
-function enforceSchoolRules(dailyPlans) {
-  dailyPlans.forEach(dayPlan => {
+function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = []) {
+  dailyPlans.forEach((dayPlan, idx) => {
     const dayStr = (dayPlan.day || '').toLowerCase();
-    const isSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+    const isWeekSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+
+    // Vérifier si c'est une période de vacances scolaires
+    const dateISO = datesISO[idx] || '';
+    const isHoliday = dateISO ? isSchoolHoliday(dateISO, schoolHolidays) : false;
+    const isSchoolDay = isWeekSchoolDay && !isHoliday;
 
     if (!dayPlan.stops) return;
 
@@ -350,6 +355,35 @@ function enforceSchoolRules(dailyPlans) {
       }
     });
   });
+}
+
+// ========================================
+// REDISTRIBUTION DES ARRÊTS SUR UNE PLAGE
+// ========================================
+
+/**
+ * Recale les horaires des arrêts pour couvrir toute la plage.
+ * Préserve les arrêts école (11:15 / 16:15) à leur position.
+ */
+function redistributeStops(stops, startTime, endTime) {
+  const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+  const toStr = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  const startMin = toMin(startTime);
+  const endMin = toMin(endTime);
+  if (endMin <= startMin || stops.length === 0) return;
+
+  const interval = (endMin - startMin) / stops.length;
+
+  stops.forEach((stop, i) => {
+    // Ne pas déplacer les arrêts école (horaires imposés)
+    if (stop.type === 'school') return;
+    const proposed = Math.round(startMin + i * interval);
+    stop.time = toStr(Math.min(proposed, endMin - 15));
+  });
+
+  // Trier par horaire après redistribution
+  stops.sort((a, b) => toMin(a.time) - toMin(b.time));
 }
 
 // ========================================
@@ -406,9 +440,14 @@ async function handleGenerate() {
       datesISO.push(d.toISOString().split('T')[0]);
     }
 
-    // --- Météo (Open-Meteo, gratuit) ---
-    setProgress('Prévisions météo (Open-Meteo)...', 22);
-    const weatherForecast = await fetchWeatherForecast(originObj.lat, originObj.lng, startDateObj, duration);
+    // --- Météo + Vacances scolaires (APIs gratuites) ---
+    setProgress('Prévisions météo & calendrier scolaire...', 22);
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setDate(endDateObj.getDate() + duration - 1);
+    const [weatherForecast, schoolHolidays] = await Promise.all([
+      fetchWeatherForecast(originObj.lat, originObj.lng, startDateObj, duration),
+      fetchSchoolHolidays(startDateObj, endDateObj),
+    ]);
 
     // --- SIRENE ---
     setProgress(`Vérification légale SIRENE...`, 30);
@@ -522,23 +561,31 @@ async function handleGenerate() {
       const t = getTimesForDay(i);
       perDayTimes.push(t);
 
+      const isHoliday = isSchoolHoliday(datesISO[i], schoolHolidays);
       const mornLabel = t.hasMorning ? `Matin ${t.mornStart}-${t.mornEnd}` : 'PAS DE MATIN (0 arrêts)';
       const aftLabel = t.hasAfternoon ? `Aprem ${t.aftStart}-${t.aftEnd}` : 'PAS D\'APRÈS-MIDI (0 arrêts)';
-      perDayTimesPrompt += `  - ${datesList[i]} : ${mornLabel}, ${aftLabel}\n`;
+      const holidayTag = isHoliday ? ' [VACANCES SCOLAIRES - PAS D\'ÉCOLE]' : '';
+      perDayTimesPrompt += `  - ${datesList[i]} : ${mornLabel}, ${aftLabel}${holidayTag}\n`;
     }
 
     setProgress('Analyse IA Stratégique...', 60);
     el.displayBrand.textContent = officialBrand;
     el.dateSpan.textContent = new Date().toLocaleDateString('fr-FR');
 
+    // Construire info vacances scolaires pour le prompt
+    const holidayInfo = schoolHolidays.length > 0
+      ? `VACANCES SCOLAIRES en cours : ${schoolHolidays.map(h => h.description || `${h.start} au ${h.end}`).join(', ')}. Les jours marqués [VACANCES SCOLAIRES] ne doivent avoir AUCUN arrêt école.`
+      : '';
+
     const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
 RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
 ${exclusionInstruction}
 STRATÉGIE CARDINALE: Attribue à chaque jour une direction dominante (Nord, Sud, Est, Ouest).
 PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
-HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau (ne mets aucun stop). Respecte scrupuleusement les horaires donnés pour chaque jour.
+HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau (ne mets aucun stop).
+RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
-ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi. Matin à "11:15", après-midi à "16:15".
+ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
 ANTI-DOUBLON: Aucune adresse répétée.
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
@@ -580,21 +627,33 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name };
 
-    // --- Garde-fou créneaux désactivés (supprime les arrêts hors créneau) ---
+    // --- Garde-fou créneaux désactivés + recalage horaire ---
     data.dailyPlans.forEach((dayPlan, idx) => {
       const t = perDayTimes[idx];
       if (!t || !dayPlan.stops) return;
 
+      // Supprimer les arrêts hors créneaux actifs
       dayPlan.stops = dayPlan.stops.filter(stop => {
         const hour = parseInt((stop.time || '12:00').split(':')[0]);
-        if (!t.hasMorning && hour < 14) return false;  // Pas de matin → supprime
-        if (!t.hasAfternoon && hour >= 14) return false; // Pas d'aprem → supprime
+        if (!t.hasMorning && hour < 14) return false;
+        if (!t.hasAfternoon && hour >= 14) return false;
         return true;
       });
+
+      // Recaler les horaires des arrêts dans les plages réelles
+      const mornStops = dayPlan.stops.filter(s => parseInt(s.time.split(':')[0]) < 14);
+      const aftStops = dayPlan.stops.filter(s => parseInt(s.time.split(':')[0]) >= 14);
+
+      if (t.hasMorning && mornStops.length > 0) {
+        redistributeStops(mornStops, t.mornStart, t.mornEnd);
+      }
+      if (t.hasAfternoon && aftStops.length > 0) {
+        redistributeStops(aftStops, t.aftStart, t.aftEnd);
+      }
     });
 
     // --- Garde-fou écoles (1er passage) ---
-    enforceSchoolRules(data.dailyPlans);
+    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
 
     // --- Validation topographique des arrêts ---
     setProgress('Génération des tracés réels...', 75);
@@ -712,7 +771,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     // --- Garde-fou écoles (2e passage post-topographie) ---
-    enforceSchoolRules(data.dailyPlans);
+    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
 
     // --- Rendu HTML sécurisé ---
     setProgress('Calcul itinéraire routier (OSRM)...', 85);
@@ -896,6 +955,12 @@ function getTimesForDay(dayIndex) {
   const defaultMorn = parseTimes(inputRefs.morning?.value || '10:00 - 13:00');
   const defaultAft = parseTimes(inputRefs.afternoon?.value || '14:00 - 18:00');
 
+  // Garantir des valeurs par défaut solides
+  const safeMornStart = defaultMorn.start || '10:00';
+  const safeMornEnd = defaultMorn.end || '13:00';
+  const safeAftStart = defaultAft.start || '14:00';
+  const safeAftEnd = defaultAft.end || '18:00';
+
   const mornInput = document.getElementById(`perDay_morn_${dayIndex}`);
   const aftInput = document.getElementById(`perDay_aft_${dayIndex}`);
 
@@ -910,10 +975,10 @@ function getTimesForDay(dayIndex) {
   return {
     hasMorning,
     hasAfternoon,
-    mornStart: morn?.start || defaultMorn.start,
-    mornEnd: morn?.end || defaultMorn.end,
-    aftStart: aft?.start || defaultAft.start,
-    aftEnd: aft?.end || defaultAft.end,
+    mornStart: (morn?.start && morn.start !== '') ? morn.start : safeMornStart,
+    mornEnd: (morn?.end && morn.end !== '') ? morn.end : safeMornEnd,
+    aftStart: (aft?.start && aft.start !== '') ? aft.start : safeAftStart,
+    aftEnd: (aft?.end && aft.end !== '') ? aft.end : safeAftEnd,
   };
 }
 

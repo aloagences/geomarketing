@@ -538,6 +538,27 @@ function getWeatherInfo(code) {
 }
 
 /**
+ * Récupère les vacances scolaires françaises couvrant la période donnée.
+ * Source : data.education.gouv.fr (API ouverte, gratuite, sans clé).
+ * @returns {Array<{start: string, end: string, description: string}>}
+ */
+async function fetchSchoolHolidays(startDate, endDate, zone = 'B') {
+  try {
+    const start = startDate.toISOString().split('T')[0];
+    const end = endDate.toISOString().split('T')[0];
+    const url = `https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-calendrier-scolaire/records?where=end_date>='${start}' AND start_date<='${end}' AND zones like '${zone}'&limit=20`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || []).map(r => ({
+      start: (r.start_date || '').split('T')[0],
+      end: (r.end_date || '').split('T')[0],
+      description: r.description || '',
+    }));
+  } catch { return []; }
+}
+
+/**
  * Récupère les prévisions météo pour une position et des dates données.
  * @returns {Object} Map de "YYYY-MM-DD" → { code, tempMax, tempMin, precipitation, wind, label, icon, ... }
  */

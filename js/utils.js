@@ -88,10 +88,38 @@ function formatNumber(n) {
   return new Intl.NumberFormat('fr-FR').format(n);
 }
 
+/**
+ * Normalise un horaire en format HH:MM.
+ * Gère : "10", "10h", "10h30", "10:30", "10H00"
+ */
+function normalizeTime(t) {
+  if (!t) return '';
+  t = t.trim().replace(/[hH]/g, ':');
+  if (/^\d{1,2}$/.test(t)) return t.padStart(2, '0') + ':00';
+  if (/^\d{1,2}:$/.test(t)) return t.replace(':', '').padStart(2, '0') + ':00';
+  if (/^\d{1,2}:\d{1,2}$/.test(t)) {
+    const [h, m] = t.split(':');
+    return h.padStart(2, '0') + ':' + m.padStart(2, '0');
+  }
+  return t;
+}
+
+/**
+ * Parse une plage horaire ("10:00 - 13:00", "10-13h", "10h30 - 13h", etc.)
+ */
 function parseTimes(timeStr) {
-  const parts = timeStr.split('-');
+  if (!timeStr || !timeStr.trim()) return { start: '', end: '' };
+  const parts = timeStr.split(/\s*[-–à]\s*/);
   return {
-    start: (parts[0] || '').trim(),
-    end: (parts[1] || '').trim(),
+    start: normalizeTime((parts[0] || '').trim()),
+    end: normalizeTime((parts[1] || '').trim()),
   };
+}
+
+/**
+ * Vérifie si une date ISO (YYYY-MM-DD) tombe pendant les vacances scolaires.
+ */
+function isSchoolHoliday(dateISO, holidays) {
+  if (!holidays || holidays.length === 0) return false;
+  return holidays.some(h => dateISO >= h.start && dateISO <= h.end);
 }
