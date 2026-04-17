@@ -823,8 +823,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           stop.source = 'GÉNÉRATION (ZONE)';
         }
 
-        // Reverse geocode les adresses génériques
-        if (/^(Secteur|Sortie Scolaire|Arrêt\/Station|Place\/Rue)/i.test(stop.address)) {
+        // Reverse geocode systématique si pas de vraie adresse postale
+        // Une vraie adresse contient un numéro de rue OU une virgule (nom, ville)
+        const hasRealAddress = stop.address
+          && stop.address !== stop.locationName
+          && /\d/.test(stop.address)
+          && stop.address.includes(',');
+        if (!hasRealAddress && stop.lat && stop.lng) {
           const realAddr = await reverseGeocodeBAN(stop.lat, stop.lng);
           if (realAddr) stop.address = realAddr;
         }
