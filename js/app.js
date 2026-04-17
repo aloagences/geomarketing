@@ -481,8 +481,13 @@ async function handleGenerate() {
         const p = `Identifie les 3 principaux concurrents physiques directs de "${officialBrand}" en France. JSON: {"competitors": "Aldi, Carrefour, Leclerc"}`;
         const raw = await callActiveAI(keys, p, sys, geminiModel);
         const parsed = JSON.parse(cleanJson(raw));
-        if (parsed.competitors && !/vide|inconnu/i.test(parsed.competitors)) {
-          inputRefs.competitors.value = parsed.competitors;
+        let compValue = parsed.competitors;
+        // L'IA peut retourner un tableau d'objets ou de chaînes — normaliser en string CSV
+        if (Array.isArray(compValue)) {
+          compValue = compValue.map(c => (typeof c === 'object' ? c.name || c.brand || '' : c)).filter(Boolean).join(', ');
+        }
+        if (compValue && typeof compValue === 'string' && !/vide|inconnu/i.test(compValue)) {
+          inputRefs.competitors.value = compValue;
         }
       } catch { /* non-blocking */ }
     }
@@ -827,15 +832,17 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           stop.lat = finalLat;
           stop.lng = finalLng;
           if (validStreet) {
+            // Extraire le nom de rue comme nom de lieu (ex: "Rue du Général de Gaulle")
+            const streetName = validStreet.split(',')[0].replace(/^\d+\s*/, '').trim();
             stop.type = 'shopping';
-            stop.locationName = `Zone commerciale : ${validStreet.split(',')[0]}`;
+            stop.locationName = streetName || 'Rue commerçante';
             stop.address = validStreet;
           } else {
             stop.type = 'other';
-            stop.locationName = 'Point de chute QG';
+            stop.locationName = 'Centre-ville';
             stop.address = originObj.display_name;
           }
-          stop.source = 'GÉNÉRATION (ZONE)';
+          stop.source = 'GÉOLOCALISATION';
         }
 
         // Reverse geocode systématique si pas de vraie adresse postale

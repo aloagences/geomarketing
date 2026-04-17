@@ -420,37 +420,50 @@ function buildOverpassQuery(lat, lng, radiusMeters) {
       // Médical (dentistes, vétérinaires, médecins)
       node["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
       way["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
+      // Repères civiques (mairies, églises, chapelles)
+      node["amenity"="townhall"](around:${radiusMeters},${lat},${lng});
+      way["amenity"="townhall"](around:${radiusMeters},${lat},${lng});
+      node["amenity"="place_of_worship"](around:${radiusMeters},${lat},${lng});
+      way["amenity"="place_of_worship"](around:${radiusMeters},${lat},${lng});
     );
-    out center 800;
+    out center 1000;
   `;
 }
 
 async function fetchRealPOIs(lat, lng, radiusKm) {
-  // Essayer d'abord avec le rayon demandé, puis élargir si pas assez de résultats
-  const radiiToTry = [radiusKm * 1000, radiusKm * 1500, radiusKm * 2000];
+  // Stratégie : d'abord 4km (local), puis rayon configuré, puis x2
+  const r1 = Math.min(4000, radiusKm * 1000);
+  const r2 = radiusKm * 1000;
+  const r3 = radiusKm * 2000;
+  const radiiToTry = [...new Set([r1, r2, r3])];
 
-  for (const radiusMeters of radiiToTry) {
+  async function queryRadius(radiusMeters) {
     const query = buildOverpassQuery(lat, lng, radiusMeters);
-
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
         const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: "data=" + encodeURIComponent(query.trim()),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query.trim()),
         });
         if (!res.ok) continue;
-
         let data;
         try { data = JSON.parse(await res.text()); } catch { continue; }
-
         const pois = data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean);
-        const unique = pois.filter((v, i, a) => a.findIndex(v2 => v2.name === v.name) === i);
-        // Accepter dès qu'on a au moins 5 POIs, sinon élargir le rayon
-        if (unique.length >= 5) return unique;
-        if (unique.length > 0 && radiusMeters === radiiToTry[radiiToTry.length - 1]) return unique;
+        // Déduplication par nom+adresse (deux "Boulangerie" à des adresses différentes = deux POIs distincts)
+        const unique = pois.filter((v, i, a) =>
+          a.findIndex(v2 => v2.name === v.name && v2.address === v.address) === i
+        );
+        return unique;
       } catch { /* try next endpoint */ }
     }
+    return [];
+  }
+
+  for (const radiusMeters of radiiToTry) {
+    const results = await queryRadius(radiusMeters);
+    if (results.length >= 5) return results;
+    if (results.length > 0 && radiusMeters === radiiToTry[radiiToTry.length - 1]) return results;
   }
   return [];
 }
@@ -466,13 +479,14 @@ const OSM_TYPE_LABELS = {
   electronics: 'Électronique', furniture: 'Meubles', gift: 'Cadeaux',
   mobile_phone: 'Téléphonie', newsagent: 'Presse / Tabac', pastry: 'Pâtisserie',
   deli: 'Traiteur', tobacco: 'Tabac / Presse', sports: 'Articles de sport',
-  toys: 'Jouets', pet: "Animalerie", garden_centre: 'Jardinerie',
+  toys: 'Jouets', pet: 'Animalerie', garden_centre: 'Jardinerie',
   laundry: 'Laverie', dry_cleaning: 'Pressing', photo: 'Photographe',
   copyshop: 'Imprimerie', travel_agency: 'Agence de voyage',
+  greengrocer: 'Primeur', wine: 'Cave à vins', cheese: 'Fromagerie',
   // amenity=*
   cafe: 'Café', restaurant: 'Restaurant', fast_food: 'Restauration rapide',
   bank: 'Banque', post_office: 'La Poste', townhall: 'Mairie',
-  place_of_worship: 'Lieu de culte', cinema: 'Cinéma', library: 'Médiathèque',
+  place_of_worship: 'Église / Lieu de culte', cinema: 'Cinéma', library: 'Médiathèque',
   hospital: 'Hôpital', clinic: 'Clinique', dentist: 'Dentiste',
   doctors: 'Cabinet médical', veterinary: 'Vétérinaire',
 };
@@ -485,14 +499,14 @@ const BLACKLISTED_SHOP_TYPES = new Set([
   'kiosk', 'vending_machine',
 ]);
 
-// Score de fiabilité (plus haut = meilleur point de repère)
+// Score de fiabilité (plus haut = meilleur point de repère pour le chauffeur)
 const POI_RELIABILITY = {
-  transport: 10,   // arrêt bus, gare, tram → toujours trouvable
-  market: 9,       // marché forain
-  competitor: 8,   // grande enseigne certifiée SIRENE
-  medical: 7,      // pharmacie, cabinet médical → adresse certaine
+  competitor: 10,  // concurrent ciblé → priorité absolue
+  transport: 9,    // arrêt bus, gare, tram → toujours trouvable
+  market: 8,       // marché forain → forte affluence
+  medical: 7,      // pharmacie, cabinet → adresse certaine, facile à trouver
   shopping: 6,     // commerces courants
-  culture: 5,
+  culture: 5,      // mairie, église → repères civiques
   sport: 4,
   park: 3,
   school: 2,
@@ -509,17 +523,20 @@ function parsePOI(e, originLat, originLng) {
 
   // Générer un nom depuis le type si pas de nom propre
   let name = tags.name || tags.brand;
+  const hasProperName = !!name;
   if (!name) {
     const shopType = tags.shop;
     const amenityType = tags.amenity;
+    const city = tags['addr:city'] || tags['addr:town'] || '';
+    const suffix = city ? ` (${city})` : '';
     if (shopType && OSM_TYPE_LABELS[shopType]) {
-      name = OSM_TYPE_LABELS[shopType];
+      name = OSM_TYPE_LABELS[shopType] + suffix;
     } else if (amenityType && OSM_TYPE_LABELS[amenityType]) {
-      name = OSM_TYPE_LABELS[amenityType];
+      name = OSM_TYPE_LABELS[amenityType] + suffix;
     } else if (shopType) {
-      name = shopType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      name = shopType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + suffix;
     } else {
-      return null; // pas de nom et type inconnu → on ignore
+      return null;
     }
   }
 
