@@ -494,7 +494,9 @@ async function handleGenerate() {
     const targetCity = originObj.city || inputRefs.address.value.split(',')[0].trim();
 
     if (realPOIsRaw.length === 0) {
-      showMessage("Attention : Aucun POI trouvé. Le plan sera rempli avec des secteurs résidentiels.", 'error');
+      showMessage(`Aucun commerce trouvé dans un rayon de ${radius * 2}km. Vérifiez l'adresse ou augmentez le rayon.`, 'error');
+    } else {
+      console.log(`[POI] ${realPOIsRaw.length} points d'intérêt trouvés dans la zone.`);
     }
 
     // --- Filtrage exclusions ---

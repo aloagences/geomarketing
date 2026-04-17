@@ -384,9 +384,8 @@ const OVERPASS_ENDPOINTS = [
   "https://lz4.overpass-api.de/api/interpreter",
 ];
 
-async function fetchRealPOIs(lat, lng, radiusKm) {
-  const radiusMeters = radiusKm * 1000;
-  const query = `
+function buildOverpassQuery(lat, lng, radiusMeters) {
+  return `
     [out:json][timeout:30];
     (
       // Marchés forains
@@ -418,78 +417,130 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
       // Parcs & jardins publics (affluence week-end)
       node["leisure"="park"]["name"](around:${radiusMeters},${lat},${lng});
       way["leisure"="park"]["name"](around:${radiusMeters},${lat},${lng});
+      // Médical (dentistes, vétérinaires, médecins)
+      node["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
+      way["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
     );
-    out center 500;
+    out center 800;
   `;
+}
 
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "data=" + encodeURIComponent(query.trim()),
-      });
-      if (!res.ok) continue;
+async function fetchRealPOIs(lat, lng, radiusKm) {
+  // Essayer d'abord avec le rayon demandé, puis élargir si pas assez de résultats
+  const radiiToTry = [radiusKm * 1000, radiusKm * 1500, radiusKm * 2000];
 
-      let data;
-      try { data = JSON.parse(await res.text()); } catch { continue; }
+  for (const radiusMeters of radiiToTry) {
+    const query = buildOverpassQuery(lat, lng, radiusMeters);
 
-      const pois = data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean);
-      const unique = pois.filter((v, i, a) => a.findIndex(v2 => v2.name === v.name) === i);
-      if (unique.length > 0) return unique;
-    } catch { /* try next endpoint */ }
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "data=" + encodeURIComponent(query.trim()),
+        });
+        if (!res.ok) continue;
+
+        let data;
+        try { data = JSON.parse(await res.text()); } catch { continue; }
+
+        const pois = data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean);
+        const unique = pois.filter((v, i, a) => a.findIndex(v2 => v2.name === v.name) === i);
+        // Accepter dès qu'on a au moins 5 POIs, sinon élargir le rayon
+        if (unique.length >= 5) return unique;
+        if (unique.length > 0 && radiusMeters === radiiToTry[radiiToTry.length - 1]) return unique;
+      } catch { /* try next endpoint */ }
+    }
   }
   return [];
 }
 
+// Labels français pour les types OSM sans nom propre
+const OSM_TYPE_LABELS = {
+  // shop=*
+  bakery: 'Boulangerie', pharmacy: 'Pharmacie', butcher: 'Boucherie',
+  supermarket: 'Supermarché', convenience: 'Épicerie', florist: 'Fleuriste',
+  hairdresser: 'Coiffeur', optician: 'Opticien', clothes: 'Boutique vêtements',
+  shoes: 'Chaussures', hardware: 'Quincaillerie', car_repair: 'Garage',
+  beauty: 'Institut de beauté', jewelry: 'Bijouterie', books: 'Librairie',
+  electronics: 'Électronique', furniture: 'Meubles', gift: 'Cadeaux',
+  mobile_phone: 'Téléphonie', newsagent: 'Presse / Tabac', pastry: 'Pâtisserie',
+  deli: 'Traiteur', tobacco: 'Tabac / Presse', sports: 'Articles de sport',
+  toys: 'Jouets', pet: "Animalerie", garden_centre: 'Jardinerie',
+  laundry: 'Laverie', dry_cleaning: 'Pressing', photo: 'Photographe',
+  copyshop: 'Imprimerie', travel_agency: 'Agence de voyage',
+  // amenity=*
+  cafe: 'Café', restaurant: 'Restaurant', fast_food: 'Restauration rapide',
+  bank: 'Banque', post_office: 'La Poste', townhall: 'Mairie',
+  place_of_worship: 'Lieu de culte', cinema: 'Cinéma', library: 'Médiathèque',
+  hospital: 'Hôpital', clinic: 'Clinique', dentist: 'Dentiste',
+  doctors: 'Cabinet médical', veterinary: 'Vétérinaire',
+};
+
 function parsePOI(e, originLat, originLng) {
-  let name = e.tags?.name || e.tags?.brand;
-  if (!name) return null;
+  const tags = e.tags || {};
+
+  // Générer un nom depuis le type si pas de nom propre
+  let name = tags.name || tags.brand;
+  if (!name) {
+    const shopType = tags.shop;
+    const amenityType = tags.amenity;
+    if (shopType && OSM_TYPE_LABELS[shopType]) {
+      name = OSM_TYPE_LABELS[shopType];
+    } else if (amenityType && OSM_TYPE_LABELS[amenityType]) {
+      name = OSM_TYPE_LABELS[amenityType];
+    } else if (shopType) {
+      name = shopType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    } else {
+      return null; // pas de nom et type inconnu → on ignore
+    }
+  }
 
   // Filtrer établissements non pertinents
   if (/coll[eè]ge|lyc[eé]e|cr[eè]che|maternelle|universit[eé]|campus|facult[eé]|institut/i.test(name)) {
     return null;
   }
 
-  if ((e.tags?.railway === 'station' || e.tags?.railway === 'tram_stop') && !/gare|tram/i.test(name)) {
-    name = e.tags?.railway === 'tram_stop' ? `Tram ${name}` : `Gare de ${name}`;
+  if ((tags.railway === 'station' || tags.railway === 'tram_stop') && !/gare|tram/i.test(name)) {
+    name = tags.railway === 'tram_stop' ? `Tram ${name}` : `Gare de ${name}`;
   }
 
   let address = '';
-  if (e.tags?.["addr:street"]) {
-    address = `${e.tags["addr:housenumber"] || ''} ${e.tags["addr:street"]}`.trim();
-    if (e.tags["addr:city"]) address += `, ${e.tags["addr:city"]}`;
-  } else if (e.tags?.highway === 'pedestrian' || e.tags?.place === 'square') {
+  if (tags["addr:street"]) {
+    address = `${tags["addr:housenumber"] || ''} ${tags["addr:street"]}`.trim();
+    if (tags["addr:city"]) address += `, ${tags["addr:city"]}`;
+  } else if (tags.highway === 'pedestrian' || tags.place === 'square') {
     address = `Place/Rue : ${name}`;
-  } else if (e.tags?.public_transport || e.tags?.railway || e.tags?.highway === 'bus_stop') {
+  } else if (tags.public_transport || tags.railway || tags.highway === 'bus_stop') {
     address = `Arrêt/Station : ${name}`;
-  } else if (e.tags?.amenity === 'school') {
+  } else if (tags.amenity === 'school') {
     address = `Sortie Scolaire : ${name}`;
-  } else if (e.tags?.leisure?.match(/sports_centre|stadium|swimming_pool|fitness_centre/)) {
+  } else if (tags.leisure?.match(/sports_centre|stadium|swimming_pool|fitness_centre/)) {
     address = `Complexe Sportif : ${name}`;
-  } else if (e.tags?.amenity?.match(/theatre|arts_centre|community_centre|events_venue|conference_centre/) || e.tags?.tourism?.match(/museum|gallery|attraction/)) {
+  } else if (tags.amenity?.match(/theatre|arts_centre|community_centre|events_venue|conference_centre/) || tags.tourism?.match(/museum|gallery|attraction/)) {
     address = `Lieu Culturel : ${name}`;
-  } else if (e.tags?.leisure === 'park') {
+  } else if (tags.leisure === 'park') {
     address = `Parc : ${name}`;
-  } else if (e.tags?.amenity?.match(/hospital|clinic/)) {
+  } else if (tags.amenity?.match(/hospital|clinic/)) {
     address = `Centre Médical : ${name}`;
   } else {
-    address = `Secteur : ${name}`;
+    address = name; // adresse = nom du commerce, sera enrichie par reverse geocoding si besoin
   }
 
   const clat = e.lat || e.center?.lat;
   const clng = e.lon || e.center?.lon;
+  if (!clat || !clng) return null;
 
   let type = 'other';
-  if (e.tags?.amenity === 'marketplace') type = 'market';
-  else if (e.tags?.public_transport || e.tags?.railway || e.tags?.highway === 'bus_stop') type = 'transport';
-  else if (e.tags?.leisure?.match(/sports_centre|stadium|swimming_pool|fitness_centre/)) type = 'sport';
-  else if (e.tags?.amenity?.match(/theatre|arts_centre|community_centre|events_venue|conference_centre/) || e.tags?.tourism?.match(/museum|gallery|attraction/)) type = 'culture';
-  else if (e.tags?.leisure === 'park') type = 'park';
-  else if (e.tags?.amenity?.match(/hospital|clinic/)) type = 'medical';
-  else if (e.tags?.highway === 'pedestrian' || e.tags?.shop || e.tags?.place === 'square' ||
-           e.tags?.amenity?.match(/cafe|restaurant|fast_food|cinema|bakery|bank|post_office|pharmacy|library/)) type = 'shopping';
-  else if (e.tags?.amenity === 'school') type = 'school';
+  if (tags.amenity === 'marketplace') type = 'market';
+  else if (tags.public_transport || tags.railway || tags.highway === 'bus_stop') type = 'transport';
+  else if (tags.leisure?.match(/sports_centre|stadium|swimming_pool|fitness_centre/)) type = 'sport';
+  else if (tags.amenity?.match(/theatre|arts_centre|community_centre|events_venue|conference_centre/) || tags.tourism?.match(/museum|gallery|attraction/)) type = 'culture';
+  else if (tags.leisure === 'park') type = 'park';
+  else if (tags.amenity?.match(/hospital|clinic|dentist|doctors|veterinary/)) type = 'medical';
+  else if (tags.highway === 'pedestrian' || tags.shop || tags.place === 'square' ||
+           tags.amenity?.match(/cafe|restaurant|fast_food|cinema|bakery|bank|post_office|pharmacy|library/)) type = 'shopping';
+  else if (tags.amenity === 'school') type = 'school';
 
   return {
     name,
@@ -498,7 +549,7 @@ function parsePOI(e, originLat, originLng) {
     type,
     address,
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
-    hours: e.tags?.opening_hours || "Non spécifié",
+    hours: tags.opening_hours || "Non spécifié",
   };
 }
 
