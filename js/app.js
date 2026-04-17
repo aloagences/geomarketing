@@ -706,7 +706,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     // --- Validation topographique des arrêts ---
     setProgress('Génération des tracés réels...', 75);
-    const availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors];
+
+    // Trier les POIs par fiabilité décroissante (transport > médical > commerce > ...)
+    const availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors]
+      .sort((a, b) => (b.reliability || 1) - (a.reliability || 1));
+
     const defaultComps = ['aldi', 'lidl', 'carrefour', 'store', 'brico', 'castorama', 'leroy'];
     const userCompsList = userCompetitors ? userCompetitors.split(',').map(s => s.trim().toLowerCase()) : [];
     const allCompsToCheck = [...defaultComps, ...userCompsList];
@@ -714,12 +718,18 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // Préférer les types utiles pour le chauffeur (commerces, transports)
     const USEFUL_TYPES = ['market', 'shopping', 'transport', 'competitor', 'sport', 'culture', 'medical'];
 
+    // Compteur global d'utilisations — max 2 fois par POI sur toute la campagne
+    const MAX_POI_USES = 2;
+    const poiUseCount = new Map(); // name → nb d'utilisations
+    const canUse = (name) => (poiUseCount.get(name) || 0) < MAX_POI_USES;
+    const markUsed = (name) => poiUseCount.set(name, (poiUseCount.get(name) || 0) + 1);
+
     for (const day of data.dailyPlans) {
       if (!day.stops) continue;
       const dayStr = (day.day || '').toLowerCase();
       const isSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
 
-      // usedPOINames PAR JOUR : permet la réutilisation de POIs entre jours différents
+      // Set des POIs déjà utilisés CE JOUR (évite doublons dans la même journée)
       const usedThisDay = new Set();
 
       for (const stop of day.stops) {
@@ -753,7 +763,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           const aiName = stop.locationName.toLowerCase().replace(/[^a-z0-9]/g, '');
           const idx = availablePOIs.findIndex(p => {
             const pName = p.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            return !usedThisDay.has(p.name) && (
+            return canUse(p.name) && !usedThisDay.has(p.name) && (
               (aiName.length > 2 && (aiName.includes(pName) || pName.includes(aiName))) ||
               (stop.address && stop.address.toLowerCase().includes(p.address.toLowerCase()))
             );
@@ -765,26 +775,30 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               lat: real.lat, lng: real.lng, type: real.type, source: 'OSM',
             });
             usedThisDay.add(real.name);
+            markUsed(real.name);
             isLegit = true;
           }
         }
 
-        // Fallback intelligent — privilégier commerces et transports
+        // Fallback intelligent — privilégier transport et commerces fiables
         if (!isLegit && availablePOIs.length > 0) {
           const findFallback = (filter) => availablePOIs.findIndex(p =>
             filter(p) && (isSchoolDay || p.type !== 'school')
           );
 
-          // 1. Même type, même ville, pas encore utilisé ce jour
-          let idx = findFallback(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedThisDay.has(p.name));
-          // 2. Type utile (commerce/transport), même ville, pas encore ce jour
-          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && p.address.toLowerCase().includes(targetCity.toLowerCase()) && !usedThisDay.has(p.name));
-          // 3. Type utile, pas encore ce jour
+          // 1. Transport public (arrêt bus/tram/gare) — toujours trouvable
+          let idx = findFallback(p => p.type === 'transport' && canUse(p.name) && !usedThisDay.has(p.name));
+          // 2. Même type, même ville, quota non atteint
+          if (idx === -1) idx = findFallback(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()) && canUse(p.name) && !usedThisDay.has(p.name));
+          // 3. Type utile, même ville, quota non atteint
+          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && p.address.toLowerCase().includes(targetCity.toLowerCase()) && canUse(p.name) && !usedThisDay.has(p.name));
+          // 4. Type utile, quota non atteint
+          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && canUse(p.name) && !usedThisDay.has(p.name));
+          // 5. N'importe quel POI non utilisé ce jour, quota non atteint
+          if (idx === -1) idx = findFallback(p => canUse(p.name) && !usedThisDay.has(p.name));
+          // 6. Réutilisation au-delà du quota (max 2x déjà atteint) — dernier recours avant geocoding random
           if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && !usedThisDay.has(p.name));
-          // 4. N'importe quel POI pas encore utilisé ce jour
           if (idx === -1) idx = findFallback(p => !usedThisDay.has(p.name));
-          // 5. Réutilisation (même jour) — un commerce connu vaut mieux qu'un point random
-          if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type));
           if (idx === -1) idx = findFallback(() => true);
 
           if (idx !== -1) {
@@ -795,6 +809,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               source: 'CORRECTION (Base OSM)',
             });
             usedThisDay.add(fb.name);
+            markUsed(fb.name);
             isLegit = true;
           }
         }

@@ -477,8 +477,35 @@ const OSM_TYPE_LABELS = {
   doctors: 'Cabinet médical', veterinary: 'Vétérinaire',
 };
 
+// Types OSM inutiles pour un chauffeur de street marketing
+const BLACKLISTED_SHOP_TYPES = new Set([
+  'parking', 'car_parts', 'car_wash', 'fuel', 'storage_rental',
+  'agrarian', 'agricultural_supplies', 'wholesale', 'doityourself',
+  'vacant', 'mall', // mall = le centre commercial entier, pas un point précis
+  'kiosk', 'vending_machine',
+]);
+
+// Score de fiabilité (plus haut = meilleur point de repère)
+const POI_RELIABILITY = {
+  transport: 10,   // arrêt bus, gare, tram → toujours trouvable
+  market: 9,       // marché forain
+  competitor: 8,   // grande enseigne certifiée SIRENE
+  medical: 7,      // pharmacie, cabinet médical → adresse certaine
+  shopping: 6,     // commerces courants
+  culture: 5,
+  sport: 4,
+  park: 3,
+  school: 2,
+  other: 1,
+};
+
 function parsePOI(e, originLat, originLng) {
   const tags = e.tags || {};
+
+  // Exclure types inutiles immédiatement
+  if (BLACKLISTED_SHOP_TYPES.has(tags.shop)) return null;
+  if (tags.amenity === 'parking' || tags.amenity === 'fuel') return null;
+  if (tags.landuse || tags.industrial) return null;
 
   // Générer un nom depuis le type si pas de nom propre
   let name = tags.name || tags.brand;
@@ -548,6 +575,7 @@ function parsePOI(e, originLat, originLng) {
     lng: clng,
     type,
     address,
+    reliability: POI_RELIABILITY[type] || 1,
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
     hours: tags.opening_hours || "Non spécifié",
   };
