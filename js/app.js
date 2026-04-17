@@ -498,11 +498,7 @@ async function handleGenerate() {
     const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius);
     const targetCity = originObj.city || inputRefs.address.value.split(',')[0].trim();
 
-    if (realPOIsRaw.length === 0) {
-      showMessage(`Aucun commerce trouvé dans un rayon de ${radius * 2}km. Vérifiez l'adresse ou augmentez le rayon.`, 'error');
-    } else {
-      console.log(`[POI] ${realPOIsRaw.length} points d'intérêt trouvés dans la zone.`);
-    }
+    console.log(`[POI] ${realPOIsRaw.length} points d'intérêt trouvés dans la zone (rayon ${radius}km).`);
 
     // --- Filtrage exclusions ---
     const excludedList = inputRefs.excludedCities.value.trim().toLowerCase()

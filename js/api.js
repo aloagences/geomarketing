@@ -384,88 +384,137 @@ const OVERPASS_ENDPOINTS = [
   "https://lz4.overpass-api.de/api/interpreter",
 ];
 
-function buildOverpassQuery(lat, lng, radiusMeters) {
-  return `
-    [out:json][timeout:30];
-    (
-      // Marchés forains
-      node["amenity"="marketplace"](around:${radiusMeters},${lat},${lng});
-      way["amenity"="marketplace"](around:${radiusMeters},${lat},${lng});
-      // Places & rues piétonnes
-      node["place"="square"](around:${radiusMeters},${lat},${lng});
-      way["place"="square"](around:${radiusMeters},${lat},${lng});
-      // Transports en commun (bus, tram, gares)
-      node["public_transport"](around:${radiusMeters},${lat},${lng});
-      node["railway"="station"](around:${radiusMeters},${lat},${lng});
-      node["railway"="tram_stop"](around:${radiusMeters},${lat},${lng});
-      node["highway"="bus_stop"](around:${radiusMeters},${lat},${lng});
-      way["highway"="pedestrian"](around:${radiusMeters},${lat},${lng});
-      // Commerces
-      node["shop"](around:${radiusMeters},${lat},${lng});
-      way["shop"](around:${radiusMeters},${lat},${lng});
-      // Lieux de vie quotidienne
-      node["amenity"~"school|post_office|bank|townhall|cafe|restaurant|fast_food|place_of_worship|cinema|bakery|hospital|clinic|pharmacy|library"](around:${radiusMeters},${lat},${lng});
-      way["amenity"~"school|post_office|bank|townhall|cafe|restaurant|fast_food|place_of_worship|cinema|bakery|hospital|clinic|pharmacy|library"](around:${radiusMeters},${lat},${lng});
-      // Lieux sportifs (stades, gymnases, piscines)
-      node["leisure"~"sports_centre|stadium|swimming_pool|fitness_centre"](around:${radiusMeters},${lat},${lng});
-      way["leisure"~"sports_centre|stadium|swimming_pool|fitness_centre"](around:${radiusMeters},${lat},${lng});
-      // Lieux culturels (théâtres, musées, salles de concert)
-      node["amenity"~"theatre|arts_centre|community_centre|events_venue|conference_centre"](around:${radiusMeters},${lat},${lng});
-      way["amenity"~"theatre|arts_centre|community_centre|events_venue|conference_centre"](around:${radiusMeters},${lat},${lng});
-      node["tourism"~"museum|gallery|attraction"](around:${radiusMeters},${lat},${lng});
-      way["tourism"~"museum|gallery|attraction"](around:${radiusMeters},${lat},${lng});
-      // Parcs & jardins publics (affluence week-end)
-      node["leisure"="park"]["name"](around:${radiusMeters},${lat},${lng});
-      way["leisure"="park"]["name"](around:${radiusMeters},${lat},${lng});
-      // Médical (dentistes, vétérinaires, médecins)
-      node["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
-      way["amenity"~"dentist|doctors|veterinary"](around:${radiusMeters},${lat},${lng});
-      // Repères civiques (mairies, églises, chapelles)
-      node["amenity"="townhall"](around:${radiusMeters},${lat},${lng});
-      way["amenity"="townhall"](around:${radiusMeters},${lat},${lng});
-      node["amenity"="place_of_worship"](around:${radiusMeters},${lat},${lng});
-      way["amenity"="place_of_worship"](around:${radiusMeters},${lat},${lng});
-    );
-    out center 1000;
-  `;
+// Requête rapide : nodes uniquement, types essentiels pour le chauffeur
+function buildEssentialQuery(lat, lng, radiusMeters) {
+  return `[out:json][timeout:25];(` +
+    `node["highway"="bus_stop"](around:${radiusMeters},${lat},${lng});` +
+    `node["railway"~"station|tram_stop|halt"](around:${radiusMeters},${lat},${lng});` +
+    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|supermarket|marketplace|hospital|clinic"](around:${radiusMeters},${lat},${lng});` +
+    `node["shop"~"bakery|pharmacy|supermarket|convenience|butcher|newsagent|hairdresser|optician|florist|tabacco|pastry|greengrocer|deli"](around:${radiusMeters},${lat},${lng});` +
+    `);out 600;`;
+}
+
+// Requête complète (plus lente) : tous types + way
+function buildFullQuery(lat, lng, radiusMeters) {
+  return `[out:json][timeout:45];(` +
+    `node["highway"="bus_stop"](around:${radiusMeters},${lat},${lng});` +
+    `node["railway"~"station|tram_stop|halt"](around:${radiusMeters},${lat},${lng});` +
+    `node["shop"](around:${radiusMeters},${lat},${lng});` +
+    `way["shop"](around:${radiusMeters},${lat},${lng});` +
+    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|cinema|library|hospital|clinic|dentist|doctors|marketplace|community_centre"](around:${radiusMeters},${lat},${lng});` +
+    `way["amenity"~"pharmacy|bakery|supermarket|townhall|place_of_worship|hospital|clinic|marketplace"](around:${radiusMeters},${lat},${lng});` +
+    `node["leisure"~"sports_centre|stadium|swimming_pool|fitness_centre|park"](around:${radiusMeters},${lat},${lng});` +
+    `node["tourism"~"museum|attraction"](around:${radiusMeters},${lat},${lng});` +
+    `);out center 1000;`;
+}
+
+// Fallback Nominatim : cherche des types spécifiques quand Overpass échoue
+async function fetchPOIsNominatim(lat, lng, radiusKm) {
+  const r = Math.min(radiusKm, 10); // Nominatim : limiter à 10km pour la pertinence
+  const dLat = r / 111;
+  const dLng = r / (111 * Math.cos(lat * Math.PI / 180));
+  const viewbox = `${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}`;
+  const types = ['pharmacy', 'bakery', 'supermarket', 'bus_stop', 'post_office', 'townhall', 'cafe', 'restaurant', 'bank', 'place_of_worship'];
+  const results = [];
+  const seen = new Set();
+
+  for (const type of types) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&amenity=${type}&viewbox=${viewbox}&bounded=1&limit=5&addressdetails=1`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'ALO-Geomarketing/1.7' } });
+      if (!res.ok) continue;
+      const items = await res.json();
+      for (const item of items) {
+        const itemLat = parseFloat(item.lat);
+        const itemLng = parseFloat(item.lon);
+        const rawName = item.name || item.display_name?.split(',')[0] || '';
+        const city = item.address?.city || item.address?.town || item.address?.village || '';
+        const street = item.address?.road || '';
+        const num = item.address?.house_number || '';
+        const addr = [num, street].filter(Boolean).join(' ') + (city ? `, ${city}` : '');
+        const label = OSM_TYPE_LABELS[type] || type;
+        const name = rawName || (city ? `${label} (${city})` : label);
+        const key = name + addr;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({
+          name,
+          lat: itemLat,
+          lng: itemLng,
+          type: type === 'bus_stop' ? 'transport' : 'shopping',
+          address: addr || item.display_name?.split(',').slice(0, 2).join(',') || '',
+          reliability: type === 'bus_stop' ? 9 : 6,
+          distance: calculateDistance(lat, lng, itemLat, itemLng).toFixed(1),
+          hours: 'Non spécifié',
+        });
+      }
+      await new Promise(r => setTimeout(r, 200)); // respecter rate limit Nominatim
+    } catch { /* continue */ }
+  }
+  return results;
 }
 
 async function fetchRealPOIs(lat, lng, radiusKm) {
-  // Stratégie : d'abord 4km (local), puis rayon configuré, puis x2
-  const r1 = Math.min(4000, radiusKm * 1000);
-  const r2 = radiusKm * 1000;
-  const r3 = radiusKm * 2000;
-  const radiiToTry = [...new Set([r1, r2, r3])];
+  const r4km   = Math.min(4000,            radiusKm * 1000);
+  const rFull  = radiusKm * 1000;
+  const rWide  = Math.min(radiusKm * 2000, 40000); // plafonner à 40km
 
-  async function queryRadius(radiusMeters) {
-    const query = buildOverpassQuery(lat, lng, radiusMeters);
+  function dedupe(pois) {
+    return pois.filter((v, i, a) =>
+      a.findIndex(v2 => v2.name === v.name && v2.address === v.address) === i
+    );
+  }
+
+  async function tryOverpass(queryFn, radiusMeters) {
+    const query = queryFn(lat, lng, radiusMeters);
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'data=' + encodeURIComponent(query.trim()),
+          body: 'data=' + encodeURIComponent(query),
         });
         if (!res.ok) continue;
+        const text = await res.text();
         let data;
-        try { data = JSON.parse(await res.text()); } catch { continue; }
-        const pois = data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean);
-        // Déduplication par nom+adresse (deux "Boulangerie" à des adresses différentes = deux POIs distincts)
-        const unique = pois.filter((v, i, a) =>
-          a.findIndex(v2 => v2.name === v.name && v2.address === v.address) === i
-        );
-        return unique;
-      } catch { /* try next endpoint */ }
+        try { data = JSON.parse(text); } catch { continue; }
+        if (!data.elements) continue;
+        return dedupe(data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean));
+      } catch { /* try next */ }
     }
-    return [];
+    return null; // null = échec total (pas juste 0 résultats)
   }
 
-  for (const radiusMeters of radiiToTry) {
-    const results = await queryRadius(radiusMeters);
-    if (results.length >= 5) return results;
-    if (results.length > 0 && radiusMeters === radiiToTry[radiiToTry.length - 1]) return results;
+  // Étape 1 : requête rapide essentielle à 4km
+  let results = await tryOverpass(buildEssentialQuery, r4km);
+  if (results && results.length >= 5) return results;
+
+  // Étape 2 : requête rapide essentielle au rayon complet
+  if (rFull > r4km) {
+    const r2 = await tryOverpass(buildEssentialQuery, rFull);
+    if (r2 && r2.length >= 5) return r2;
+    if (r2 && r2.length > 0) results = r2;
   }
-  return [];
+
+  // Étape 3 : requête complète (nodes + ways) au rayon complet
+  const r3 = await tryOverpass(buildFullQuery, rFull);
+  if (r3 && r3.length >= 5) return r3;
+  if (r3 && r3.length > 0) results = (results || []).concat(r3);
+
+  // Étape 4 : requête complète élargie
+  if (rWide > rFull) {
+    const r4 = await tryOverpass(buildFullQuery, rWide);
+    if (r4 && r4.length >= 3) return dedupe([...(results || []), ...r4]);
+    if (r4 && r4.length > 0) results = dedupe([...(results || []), ...r4]);
+  }
+
+  // Étape 5 : fallback Nominatim — toujours des résultats même si Overpass est KO
+  if (!results || results.length < 3) {
+    const nominatim = await fetchPOIsNominatim(lat, lng, radiusKm);
+    if (nominatim.length > 0) return dedupe([...(results || []), ...nominatim]);
+  }
+
+  return results || [];
 }
 
 // Labels français pour les types OSM sans nom propre
