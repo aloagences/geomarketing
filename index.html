@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v1.8 — 17 avril 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v1.9 — 20 avril 2026</span>
       </div>
     </header>
 
@@ -265,7 +265,15 @@
                   <label for="excludedCities" class="block text-sm font-bold text-orange-800 mb-1 flex items-center">
                     <i data-lucide="waves" class="w-4 h-4 mr-1"></i> Barrières (Villes à exclure)
                   </label>
-                  <input class="input-style border-orange-200 focus:border-orange-500" id="excludedCities" type="text" placeholder="Ex: Cagnes-sur-Mer..." />
+                  <input class="input-style border-orange-200 focus:border-orange-500" id="excludedCities" type="text" placeholder="Ex: Cagnes-sur-Mer, Verniolle..." />
+                </div>
+
+                <div class="col-span-1 md:col-span-2 border-l-4 border-purple-500 pl-3 py-1 bg-purple-50 rounded-r-lg">
+                  <label for="ownBrand" class="block text-sm font-bold text-purple-800 mb-1 flex items-center justify-between">
+                    <span class="flex items-center"><i data-lucide="shield-off" class="w-4 h-4 mr-1"></i> Notre enseigne (à ne pas cibler)</span>
+                    <span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Évite la cannibalisation</span>
+                  </label>
+                  <input class="input-style border-purple-200 focus:border-purple-500" id="ownBrand" type="text" placeholder="Ex: Marie Blachère… (notre propre réseau)" />
                 </div>
 
                 <div class="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">

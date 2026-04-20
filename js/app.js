@@ -57,6 +57,7 @@ function initDomRefs() {
   inputRefs.target = document.getElementById('targetProfile');
   inputRefs.competitors = document.getElementById('competitors');
   inputRefs.excludedCities = document.getElementById('excludedCities');
+  inputRefs.ownBrand = document.getElementById('ownBrand');
 }
 
 // ========================================
@@ -504,9 +505,20 @@ async function handleGenerate() {
     const excludedList = inputRefs.excludedCities.value.trim().toLowerCase()
       .split(',').map(c => c.trim()).filter(Boolean);
 
-    let filteredPOIs = realPOIsRaw.filter(poi =>
-      excludedList.length === 0 || !excludedList.some(ex => poi.address.toLowerCase().includes(ex))
-    );
+    // Enseigne propre du client : exclure tous leurs magasins du plan
+    const ownBrandList = (inputRefs.ownBrand?.value || '').trim().toLowerCase()
+      .split(',').map(c => c.trim()).filter(Boolean);
+
+    // Helper : un lieu est-il interdit ? (ville exclue OU propre enseigne)
+    const isBlocked = (name = '', address = '') => {
+      const nameLow = name.toLowerCase();
+      const addrLow = address.toLowerCase();
+      if (excludedList.some(ex => addrLow.includes(ex))) return true;
+      if (ownBrandList.some(b => nameLow.includes(b) || addrLow.includes(b))) return true;
+      return false;
+    };
+
+    let filteredPOIs = realPOIsRaw.filter(poi => !isBlocked(poi.name, poi.address));
 
     // --- Concurrents ---
     setProgress('Localisation des concurrents...', 50);
@@ -529,7 +541,7 @@ async function handleGenerate() {
           const sData = await verifyCompetitorSIREN(comp, originObj.lat, originObj.lng, radius);
           if (sData) {
             const dist = calculateDistance(originObj.lat, originObj.lng, sData.lat, sData.lng);
-            if (dist <= radius && !excludedList.some(ex => sData.address.toLowerCase().includes(ex))) {
+            if (dist <= radius && !isBlocked(sData.name, sData.address)) {
               preVerifiedCompetitors.push({
                 name: sData.name, lat: sData.lat, lng: sData.lng,
                 type: 'competitor', address: sData.address,
@@ -565,9 +577,14 @@ async function handleGenerate() {
       ? 'CONCURRENTS: Inclus au moins 1-2 par jour tirés de la BASE CONCURRENTS CERTIFIÉS.'
       : 'CONCURRENTS: Aucun trouvé dans le périmètre.';
 
-    const exclusionInstruction = excludedList.length > 0
-      ? `INTERDICTION : aucun arrêt dans ${excludedList.join(', ').toUpperCase()}.`
-      : 'Ne traverse PAS les fleuves majeurs.';
+    const exclusionInstruction = [
+      excludedList.length > 0
+        ? `INTERDICTION ABSOLUE : aucun arrêt dans ${excludedList.join(', ').toUpperCase()} ni dans aucune adresse contenant ces noms.`
+        : 'Ne traverse PAS les fleuves majeurs.',
+      ownBrandList.length > 0
+        ? `NOTRE ENSEIGNE À ÉVITER : ne jamais planifier d'arrêt chez ${ownBrandList.join(', ').toUpperCase()} (notre propre réseau, risque de cannibalisation).`
+        : '',
+    ].filter(Boolean).join(' ');
 
     // --- Horaires par jour (personnalisés ou par défaut) ---
     const perDayTimes = [];
@@ -852,6 +869,35 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (realAddr) stop.address = realAddr;
         }
       }
+    }
+
+    // --- FILTRE FINAL GARANTI : barrières + enseigne propre + limite chaîne ---
+    // Ce filtre est la dernière ligne de défense, appliqué APRÈS toute validation IA ou geocoding
+    for (const day of data.dailyPlans) {
+      if (!day.stops) continue;
+
+      const chainCountThisDay = {}; // nb de visites par chaîne (ex: "marie blachere" → 1)
+
+      day.stops = day.stops.filter(stop => {
+        const name = (stop.locationName || '').toLowerCase();
+        const addr = (stop.address || '').toLowerCase();
+
+        // 1. Barrière géographique absolue
+        if (excludedList.some(ex => ex && (addr.includes(ex) || name.includes(ex)))) return false;
+
+        // 2. Notre enseigne absolue
+        if (ownBrandList.some(b => b && name.includes(b))) return false;
+
+        // 3. Limite : max 2 visites de la même chaîne par jour
+        // Identifier la chaîne en prenant les 2 premiers mots significatifs du nom
+        const chainKey = name.replace(/[^a-zàâéèêëïîôùûü ]/gi, '').trim().split(/\s+/).slice(0, 2).join(' ');
+        if (chainKey.length > 3) {
+          chainCountThisDay[chainKey] = (chainCountThisDay[chainKey] || 0) + 1;
+          if (chainCountThisDay[chainKey] > 2) return false;
+        }
+
+        return true;
+      });
     }
 
     // --- Garde-fou écoles (2e passage post-topographie) ---
