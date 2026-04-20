@@ -505,20 +505,72 @@ async function handleGenerate() {
     const excludedList = inputRefs.excludedCities.value.trim().toLowerCase()
       .split(',').map(c => c.trim()).filter(Boolean);
 
-    // Enseigne propre du client : exclure tous leurs magasins du plan
-    const ownBrandList = (inputRefs.ownBrand?.value || '').trim().toLowerCase()
+    // Enseigne propre : liste des mots-clés (ex: "Marie Blachère" → ["marie blachère"])
+    const ownBrandRaw = (inputRefs.ownBrand?.value || '').trim();
+    const ownBrandList = ownBrandRaw.toLowerCase()
       .split(',').map(c => c.trim()).filter(Boolean);
 
-    // Helper : un lieu est-il interdit ? (ville exclue OU propre enseigne)
-    const isBlocked = (name = '', address = '') => {
+    // Auto-détection : trouver nos propres magasins dans les POIs de la zone
+    // et ajouter automatiquement leurs villes aux barrières
+    if (ownBrandList.length > 0) {
+      const ownStoresFound = realPOIsRaw.filter(poi =>
+        ownBrandList.some(b => poi.name.toLowerCase().includes(b))
+      );
+      if (ownStoresFound.length > 0) {
+        const newCities = [];
+        ownStoresFound.forEach(store => {
+          // Extraire la ville de l'adresse : dernier segment après la virgule
+          const cityMatch = store.address.match(/,\s*([^,]+)$/);
+          const city = cityMatch?.[1]?.trim().toLowerCase();
+          if (city && !excludedList.includes(city)) {
+            excludedList.push(city);
+            newCities.push(city);
+          }
+        });
+        if (newCities.length > 0) {
+          // Mettre à jour le champ Barrières visuellement
+          const currentVal = inputRefs.excludedCities.value.trim();
+          inputRefs.excludedCities.value = [currentVal, ...newCities]
+            .filter(Boolean).join(', ');
+          showMessage(`Barrières auto-ajoutées (notre enseigne) : ${newCities.join(', ')}`, 'info');
+        }
+      }
+    }
+
+    // Géocoder les villes exclues → coordonnées GPS pour blocage précis
+    // (certains POIs OSM n'ont pas addr:city → le blocage texte seul est insuffisant)
+    const excludedCityCoords = [];
+    for (const ex of excludedList) {
+      try {
+        const r = await fetch(
+          `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(ex)}&type=municipality&limit=1`
+        );
+        const d = await r.json();
+        if (d.features?.[0]) {
+          const [lng, lat] = d.features[0].geometry.coordinates;
+          excludedCityCoords.push({ name: ex, lat, lng });
+        }
+      } catch { /* continuer sans coords */ }
+    }
+
+    // Helper : un lieu est-il interdit ? (texte OU coordonnées dans rayon 3km)
+    const isBlocked = (name = '', address = '', lat = null, lng = null) => {
       const nameLow = name.toLowerCase();
       const addrLow = address.toLowerCase();
-      if (excludedList.some(ex => addrLow.includes(ex))) return true;
-      if (ownBrandList.some(b => nameLow.includes(b) || addrLow.includes(b))) return true;
+      // Blocage par texte
+      if (excludedList.some(ex => ex && (addrLow.includes(ex) || nameLow.includes(ex)))) return true;
+      // Blocage par coordonnées GPS (fiable quand addr:city manque dans OSM)
+      if (lat && lng && excludedCityCoords.some(ec =>
+        calculateDistance(lat, lng, ec.lat, ec.lng) <= 3
+      )) return true;
+      // Notre enseigne : blocage par nom (mots-clés)
+      if (ownBrandList.some(b => b && nameLow.includes(b))) return true;
       return false;
     };
 
-    let filteredPOIs = realPOIsRaw.filter(poi => !isBlocked(poi.name, poi.address));
+    let filteredPOIs = realPOIsRaw.filter(poi =>
+      !isBlocked(poi.name, poi.address, poi.lat, poi.lng)
+    );
 
     // --- Concurrents ---
     setProgress('Localisation des concurrents...', 50);
@@ -541,7 +593,7 @@ async function handleGenerate() {
           const sData = await verifyCompetitorSIREN(comp, originObj.lat, originObj.lng, radius);
           if (sData) {
             const dist = calculateDistance(originObj.lat, originObj.lng, sData.lat, sData.lng);
-            if (dist <= radius && !isBlocked(sData.name, sData.address)) {
+            if (dist <= radius && !isBlocked(sData.name, sData.address, sData.lat, sData.lng)) {
               preVerifiedCompetitors.push({
                 name: sData.name, lat: sData.lat, lng: sData.lng,
                 type: 'competitor', address: sData.address,
@@ -879,18 +931,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       const chainCountThisDay = {}; // nb de visites par chaîne (ex: "marie blachere" → 1)
 
       day.stops = day.stops.filter(stop => {
-        const name = (stop.locationName || '').toLowerCase();
-        const addr = (stop.address || '').toLowerCase();
+        // Blocage combiné texte + GPS : le plus robuste
+        if (isBlocked(stop.locationName || '', stop.address || '', stop.lat, stop.lng)) return false;
 
-        // 1. Barrière géographique absolue
-        if (excludedList.some(ex => ex && (addr.includes(ex) || name.includes(ex)))) return false;
-
-        // 2. Notre enseigne absolue
-        if (ownBrandList.some(b => b && name.includes(b))) return false;
-
-        // 3. Limite : max 2 visites de la même chaîne par jour
-        // Identifier la chaîne en prenant les 2 premiers mots significatifs du nom
-        const chainKey = name.replace(/[^a-zàâéèêëïîôùûü ]/gi, '').trim().split(/\s+/).slice(0, 2).join(' ');
+        // Limite : max 2 visites de la même chaîne par jour
+        const chainKey = (stop.locationName || '').toLowerCase()
+          .replace(/[^a-zàâéèêëïîôùûü ]/gi, '').trim()
+          .split(/\s+/).slice(0, 2).join(' ');
         if (chainKey.length > 3) {
           chainCountThisDay[chainKey] = (chainCountThisDay[chainKey] || 0) + 1;
           if (chainCountThisDay[chainKey] > 2) return false;
@@ -1032,6 +1079,10 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
  * Génère dynamiquement les lignes de personnalisation par jour
  * dans le conteneur #perDayScheduleContainer.
  */
+// Mémorisation des défauts précédents pour la mise à jour intelligente
+let _prevDefaultMorn = '';
+let _prevDefaultAft = '';
+
 function rebuildPerDaySchedule() {
   const container = document.getElementById('perDayScheduleContainer');
   if (!container) return;
@@ -1044,28 +1095,36 @@ function rebuildPerDaySchedule() {
     return;
   }
 
-  // Sauvegarder les valeurs personnalisées existantes AVANT de reconstruire
+  const newDefaultMorn = inputRefs.morning?.value || '10:00 - 13:00';
+  const newDefaultAft = inputRefs.afternoon?.value || '14:00 - 18:00';
+
+  // Sauvegarder les valeurs existantes AVANT de reconstruire
   const saved = {};
   for (let i = 0; i < 31; i++) {
     const m = document.getElementById(`perDay_morn_${i}`);
     const a = document.getElementById(`perDay_aft_${i}`);
-    if (m) saved[`morn_${i}`] = m.value;
-    if (a) saved[`aft_${i}`] = a.value;
+    if (m !== null) {
+      // Si la valeur est l'ANCIEN défaut → on la met à jour avec le NOUVEAU défaut
+      // Si la valeur est une perso → on la conserve telle quelle
+      const mVal = (_prevDefaultMorn && m.value === _prevDefaultMorn) ? newDefaultMorn : m.value;
+      const aVal = (_prevDefaultAft && a && a.value === _prevDefaultAft) ? newDefaultAft : (a?.value ?? '');
+      saved[i] = { morn: mVal, aft: aVal };
+    }
   }
 
-  const defaultMorn = inputRefs.morning?.value || '10:00 - 13:00';
-  const defaultAft = inputRefs.afternoon?.value || '14:00 - 18:00';
-  const startObj = new Date(startDate);
+  _prevDefaultMorn = newDefaultMorn;
+  _prevDefaultAft = newDefaultAft;
 
+  const startObj = new Date(startDate);
   let html = '';
   for (let i = 0; i < duration; i++) {
     const d = new Date(startObj);
     d.setDate(d.getDate() + i);
     const dayLabel = d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: '2-digit' });
 
-    // Garder la valeur perso si elle existe, sinon utiliser le défaut
-    const mornVal = (saved[`morn_${i}`] !== undefined) ? saved[`morn_${i}`] : defaultMorn;
-    const aftVal = (saved[`aft_${i}`] !== undefined) ? saved[`aft_${i}`] : defaultAft;
+    // Valeur perso conservée, ou nouveau défaut pour les nouveaux jours
+    const mornVal = saved[i] !== undefined ? saved[i].morn : newDefaultMorn;
+    const aftVal  = saved[i] !== undefined ? saved[i].aft  : newDefaultAft;
 
     html += `
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 p-2 rounded-lg bg-white border border-indigo-100">
