@@ -393,6 +393,7 @@ async function saveStop(stopId) {
     }
 
     cancelEditStop(stopId);
+    lucide.createIcons(); // Rafraîchir les icônes Lucide après mise à jour du DOM
   } catch (err) {
     console.error('[saveStop]', err);
     if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
@@ -761,6 +762,16 @@ async function handleGenerate() {
       poiContext += `\nBASE CONCURRENTS CERTIFIÉS :\n${JSON.stringify(preVerifiedCompetitors)}\n`;
     }
 
+    // Jours de marché vérifiés via OSM opening_hours
+    const marketPOIs = filteredPOIs.filter(p => p.type === 'market');
+    if (marketPOIs.length > 0) {
+      const marketLines = marketPOIs.map(m =>
+        `${m.name} (${m.address}) → ouvert : ${m.marketDays.length ? m.marketDays.join(', ') : 'mercredi, samedi'}`
+      ).join('\n');
+      poiContext += `\nMARCHÉS FORAINS VÉRIFIÉS (jours réels OSM) :\n${marketLines}\n`;
+      poiContext += `RÈGLE ABSOLUE : ne placer un marché QUE sur les jours indiqués ci-dessus.\n`;
+    }
+
     let competitorInstruction = preVerifiedCompetitors.length > 0
       ? 'CONCURRENTS: Inclus au moins 1-2 par jour tirés de la BASE CONCURRENTS CERTIFIÉS.'
       : 'CONCURRENTS: Aucun trouvé dans le périmètre.';
@@ -806,8 +817,8 @@ JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une pa
 HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
 RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
-MARCHÉS: Les arrêts type "market" se planifient TOUJOURS en matin à partir de 10h00.
-CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient de préférence entre 12h00 et 14h00 (affluence pause déjeuner), surtout le mercredi et le samedi.
+MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00. Ne jamais placer un marché un mardi, lundi, jeudi ou vendredi.
+CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient entre 12h00 et 14h00 les mercredis après-midi et samedis après-midi (pic d'affluence pause déjeuner et week-end).
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
 ANTI-DOUBLON: Aucune adresse répétée.
@@ -982,6 +993,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             Object.assign(stop, {
               locationName: real.name, address: real.address,
               lat: real.lat, lng: real.lng, type: real.type, source: 'OSM',
+              marketDays: real.marketDays || [],
             });
             usedThisDay.add(real.name);
             markUsed(real.name);
@@ -1016,6 +1028,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               locationName: fb.name, address: fb.address,
               lat: fb.lat, lng: fb.lng, type: fb.type,
               source: 'CORRECTION (Base OSM)',
+              marketDays: fb.marketDays || [],
             });
             usedThisDay.add(fb.name);
             markUsed(fb.name);
@@ -1062,24 +1075,40 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       }
     }
 
-    // --- SMART SCHEDULING : marchés le matin, centres commerciaux midi ---
+    // --- SMART SCHEDULING : marchés selon jours OSM, centres commerciaux aprem mer/sam ---
+    const FR_DAYS = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+
     for (const day of data.dailyPlans) {
       if (!day.stops || day.stops.length === 0) continue;
       const dayStr = (day.day || '').toLowerCase();
-      const isWedOrSat = dayStr.includes('mercredi') || dayStr.includes('samedi');
+      // Extraire le nom du jour en français depuis la chaîne (ex: "mercredi 29/04/2026")
+      const dayFr = FR_DAYS.find(d => dayStr.includes(d)) || '';
+      const isWedOrSat = dayFr === 'mercredi' || dayFr === 'samedi';
 
-      // Séparer matin (< 14h) et après-midi (>= 14h)
       const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
-      const morning = day.stops.filter(s => toMin(s.time) < 14 * 60);
+      const morning   = day.stops.filter(s => toMin(s.time) < 14 * 60);
       const afternoon = day.stops.filter(s => toMin(s.time) >= 14 * 60);
 
-      // Matin : marchés en premier (ils seront à l'heure la plus tôt)
-      morning.sort((a, b) => {
-        const aM = a.type === 'market'; const bM = b.type === 'market';
-        return aM === bM ? 0 : aM ? -1 : 1;
+      // Valider les marchés : vérifier que le jour courant est dans marketDays (données OSM réelles)
+      // Si un marché est placé le mauvais jour → downgrade en shopping
+      day.stops.forEach(s => {
+        if (s.type !== 'market') return;
+        const validDays = s.marketDays?.length ? s.marketDays : ['mercredi', 'samedi'];
+        if (dayFr && !validDays.includes(dayFr)) {
+          console.log(`[Market] ${s.locationName} invalidé pour ${dayFr} (ouvert : ${validDays.join(', ')})`);
+          s.type = 'shopping'; // mauvais jour → dégradé
+        }
       });
 
-      // Mercredi/Samedi après-midi : centres commerciaux et concurrents en premier (créneau 12-14h)
+      // Matin mer/sam : marchés valides en premier (heure la plus tôt du créneau)
+      if (isWedOrSat) {
+        morning.sort((a, b) => {
+          const aM = a.type === 'market'; const bM = b.type === 'market';
+          return aM === bM ? 0 : aM ? -1 : 1;
+        });
+      }
+
+      // Après-midi mer/sam : centres commerciaux et concurrents en premier (créneau 12h-14h)
       if (isWedOrSat) {
         afternoon.sort((a, b) => {
           const aS = ['shopping', 'competitor'].includes(a.type);
@@ -1088,10 +1117,10 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         });
       }
 
-      // Réattribuer les temps des créneaux triés (conserver les temps existants, juste réordonner)
+      // Réappliquer les temps dans le nouvel ordre
       const mornTimes = morning.map(s => s.time);
       const aftTimes  = afternoon.map(s => s.time);
-      morning.forEach((s, i) => { s.time = mornTimes[i]; });
+      morning.forEach((s, i)   => { s.time = mornTimes[i]; });
       afternoon.forEach((s, i) => { s.time = aftTimes[i]; });
       day.stops = [...morning, ...afternoon];
     }

@@ -562,6 +562,23 @@ const POI_RELIABILITY = {
   other: 1,
 };
 
+// Extraire les jours d'ouverture depuis le format OSM opening_hours
+// Ex: "Mo,We,Sa 07:00-13:00" → ['lundi', 'mercredi', 'samedi']
+function parseMarketDays(openingHours) {
+  if (!openingHours || openingHours === 'Non spécifié') return [];
+  const dayMap = {
+    mo: 'lundi', tu: 'mardi', we: 'mercredi',
+    th: 'jeudi', fr: 'vendredi', sa: 'samedi', su: 'dimanche',
+  };
+  const oh = openingHours.toLowerCase();
+  const days = [];
+  for (const [abbr, fr] of Object.entries(dayMap)) {
+    // Chercher l'abréviation comme mot entier (éviter "the" qui contient "th")
+    if (new RegExp(`(?<![a-z])${abbr}(?![a-z])`).test(oh)) days.push(fr);
+  }
+  return days;
+}
+
 function parsePOI(e, originLat, originLng) {
   const tags = e.tags || {};
 
@@ -635,6 +652,13 @@ function parsePOI(e, originLat, originLng) {
            tags.amenity?.match(/cafe|restaurant|fast_food|cinema|bakery|bank|post_office|pharmacy|library/)) type = 'shopping';
   else if (tags.amenity === 'school') type = 'school';
 
+  const openingHours = tags.opening_hours || 'Non spécifié';
+  // Pour les marchés forains : extraire les jours réels d'ouverture depuis OSM
+  // Si pas de tag opening_hours → jours par défaut mercredi+samedi (standard France)
+  const marketDays = type === 'market'
+    ? (parseMarketDays(openingHours).length > 0 ? parseMarketDays(openingHours) : ['mercredi', 'samedi'])
+    : [];
+
   return {
     name,
     lat: clat,
@@ -643,7 +667,8 @@ function parsePOI(e, originLat, originLng) {
     address,
     reliability: POI_RELIABILITY[type] || 1,
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
-    hours: tags.opening_hours || "Non spécifié",
+    hours: openingHours,
+    marketDays, // jours où le marché est ouvert (vide pour les non-marchés)
   };
 }
 
