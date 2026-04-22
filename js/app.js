@@ -242,25 +242,161 @@ function renderWeatherBadge(weather) {
 }
 
 // ========================================
+// REGISTRE DES ARRÊTS (pour édition inline)
+// ========================================
+const stopRegistry = {};
+let _stopCounter = 0;
+
+// ========================================
 // RENDU HTML SÉCURISÉ D'UN ARRÊT
 // ========================================
 
 function renderStopHTML(stop, distBadge) {
+  const stopId = `stop_${_stopCounter++}`;
+  stopRegistry[stopId] = { ...stop };
+
+  // Adresse en gras (repère principal), nom du commerce en secondaire
+  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
+  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+
   return `
-    <div class="flex items-center p-6 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
-      <div class="w-20 font-extrabold text-2xl text-[#0E2C59] tracking-tight">${sanitize(stop.time)}</div>
-      <div class="flex-1 min-w-0 border-l-2 border-gray-100 pl-6">
-        <div class="flex items-center flex-wrap">
-          ${getTypeIconHTML(stop.type)}
-          <span class="font-extrabold text-gray-900 text-xl">${sanitize(stop.locationName)}</span>
-          ${distBadge}
+    <div class="stop-card flex items-center p-5 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4" data-stop-id="${stopId}">
+      <div class="w-20 font-extrabold text-2xl text-[#0E2C59] tracking-tight flex-shrink-0">${sanitize(stop.time)}</div>
+      <div class="flex-1 min-w-0 border-l-2 border-gray-100 pl-5">
+
+        <!-- Vue normale -->
+        <div class="stop-view">
+          <div class="flex items-center flex-wrap gap-2">
+            ${getTypeIconHTML(stop.type)}
+            <span class="font-extrabold text-gray-900 text-lg">${sanitize(street)}</span>
+            ${distBadge}
+            <button onclick="editStop('${stopId}')"
+              class="ml-auto text-gray-300 hover:text-blue-500 transition-colors p-1 rounded"
+              title="Modifier cet arrêt">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="text-sm text-gray-500 mt-1.5 flex items-center flex-wrap gap-x-2">
+            <span class="text-gray-400 text-xs">Repère visuel :</span>
+            <span class="font-medium text-gray-700">${sanitize(stop.locationName)}</span>
+            ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
+            <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">
+              SRC: ${sanitize(stop.source)}
+            </span>
+          </div>
         </div>
-        <div class="text-sm text-gray-500 mt-2 flex items-center flex-wrap font-medium">
-          ${sanitize(stop.address)}
-          <span class="text-[10px] text-gray-400 uppercase tracking-widest ml-3 border-l border-gray-300 pl-3">SRC: ${sanitize(stop.source)}</span>
+
+        <!-- Mode édition (caché par défaut) -->
+        <div class="stop-edit hidden">
+          <div class="flex flex-wrap gap-2 mt-1">
+            <input type="text" id="edit-addr-${stopId}"
+              class="input-style text-sm flex-1 min-w-[200px]"
+              placeholder="Adresse complète" value="${sanitize(stop.address)}" />
+            <input type="text" id="edit-name-${stopId}"
+              class="input-style text-sm flex-1 min-w-[150px]"
+              placeholder="Repère visuel (nom)" value="${sanitize(stop.locationName)}" />
+            <button onclick="saveStop('${stopId}')"
+              id="save-btn-${stopId}"
+              class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700 whitespace-nowrap">
+              ✓ Valider
+            </button>
+            <button onclick="cancelEditStop('${stopId}')"
+              class="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-200">
+              Annuler
+            </button>
+          </div>
+          <p class="text-[11px] text-blue-500 mt-1">L'adresse sera vérifiée et la distance recalculée via BAN.</p>
         </div>
+
       </div>
     </div>`;
+}
+
+function editStop(stopId) {
+  const card = document.querySelector(`[data-stop-id="${stopId}"]`);
+  card?.querySelector('.stop-view')?.classList.add('hidden');
+  card?.querySelector('.stop-edit')?.classList.remove('hidden');
+  card?.querySelector(`#edit-addr-${stopId}`)?.focus();
+}
+
+function cancelEditStop(stopId) {
+  const card = document.querySelector(`[data-stop-id="${stopId}"]`);
+  card?.querySelector('.stop-view')?.classList.remove('hidden');
+  card?.querySelector('.stop-edit')?.classList.add('hidden');
+}
+
+async function saveStop(stopId) {
+  const card  = document.querySelector(`[data-stop-id="${stopId}"]`);
+  const addrEl = document.getElementById(`edit-addr-${stopId}`);
+  const nameEl = document.getElementById(`edit-name-${stopId}`);
+  const btn    = document.getElementById(`save-btn-${stopId}`);
+  if (!addrEl) return;
+
+  const newAddr = addrEl.value.trim();
+  const newName = (nameEl?.value || '').trim();
+  if (!newAddr) return;
+
+  if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+
+  try {
+    const stop = stopRegistry[stopId];
+    const geoResult = await geocodeAddressBAN(newAddr);
+
+    if (geoResult?.lat) {
+      stop.lat = geoResult.lat;
+      stop.lng = geoResult.lng;
+      stop.address = geoResult.label || newAddr;
+    } else {
+      stop.address = newAddr;
+    }
+    if (newName) stop.locationName = newName;
+    stop.source = 'MANUEL';
+
+    // Recalculer distance
+    let distBadge = '';
+    const shopLoc = window._shopLocation;
+    if (shopLoc && stop.lat && stop.lng) {
+      const dist = calculateDistance(shopLoc.lat, shopLoc.lng, stop.lat, stop.lng);
+      const cls  = dist <= 5 ? 'text-green-600' : dist <= 15 ? 'text-orange-500' : 'text-red-500';
+      distBadge  = `<span class="${cls} font-bold text-sm ml-1">✓ ${dist.toFixed(1)}km</span>`;
+    }
+
+    const street = stop.address.split(',')[0]?.trim() || stop.address;
+    const city   = stop.address.split(',').slice(1).join(',').trim() || '';
+
+    const viewDiv = card?.querySelector('.stop-view');
+    if (viewDiv) {
+      viewDiv.innerHTML = `
+        <div class="flex items-center flex-wrap gap-2">
+          ${getTypeIconHTML(stop.type)}
+          <span class="font-extrabold text-gray-900 text-lg">${sanitize(street)}</span>
+          ${distBadge}
+          <button onclick="editStop('${stopId}')"
+            class="ml-auto text-gray-300 hover:text-blue-500 transition-colors p-1 rounded">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="text-sm text-gray-500 mt-1.5 flex items-center flex-wrap gap-x-2">
+          <span class="text-gray-400 text-xs">Repère visuel :</span>
+          <span class="font-medium text-gray-700">${sanitize(stop.locationName)}</span>
+          ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
+          <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">SRC: MANUEL</span>
+        </div>`;
+    }
+
+    cancelEditStop(stopId);
+  } catch (err) {
+    console.error('[saveStop]', err);
+    if (btn) { btn.textContent = '✓ Valider'; btn.disabled = false; }
+  }
 }
 
 // ========================================
@@ -670,6 +806,8 @@ JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une pa
 HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
 RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
+MARCHÉS: Les arrêts type "market" se planifient TOUJOURS en matin à partir de 10h00.
+CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient de préférence entre 12h00 et 14h00 (affluence pause déjeuner), surtout le mercredi et le samedi.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
 ANTI-DOUBLON: Aucune adresse répétée.
@@ -711,6 +849,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     data.shopLocation = { lat: originObj.lat, lng: originObj.lng, address: originObj.display_name };
+    window._shopLocation = data.shopLocation; // exposé pour l'édition inline des arrêts
 
     // --- Normalisation : exactement 1 entrée par date, dans l'ordre ---
     // L'IA peut sauter des jours, en dupliquer, ou les mettre dans le désordre.
@@ -921,6 +1060,40 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (realAddr) stop.address = realAddr;
         }
       }
+    }
+
+    // --- SMART SCHEDULING : marchés le matin, centres commerciaux midi ---
+    for (const day of data.dailyPlans) {
+      if (!day.stops || day.stops.length === 0) continue;
+      const dayStr = (day.day || '').toLowerCase();
+      const isWedOrSat = dayStr.includes('mercredi') || dayStr.includes('samedi');
+
+      // Séparer matin (< 14h) et après-midi (>= 14h)
+      const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+      const morning = day.stops.filter(s => toMin(s.time) < 14 * 60);
+      const afternoon = day.stops.filter(s => toMin(s.time) >= 14 * 60);
+
+      // Matin : marchés en premier (ils seront à l'heure la plus tôt)
+      morning.sort((a, b) => {
+        const aM = a.type === 'market'; const bM = b.type === 'market';
+        return aM === bM ? 0 : aM ? -1 : 1;
+      });
+
+      // Mercredi/Samedi après-midi : centres commerciaux et concurrents en premier (créneau 12-14h)
+      if (isWedOrSat) {
+        afternoon.sort((a, b) => {
+          const aS = ['shopping', 'competitor'].includes(a.type);
+          const bS = ['shopping', 'competitor'].includes(b.type);
+          return aS === bS ? 0 : aS ? -1 : 1;
+        });
+      }
+
+      // Réattribuer les temps des créneaux triés (conserver les temps existants, juste réordonner)
+      const mornTimes = morning.map(s => s.time);
+      const aftTimes  = afternoon.map(s => s.time);
+      morning.forEach((s, i) => { s.time = mornTimes[i]; });
+      afternoon.forEach((s, i) => { s.time = aftTimes[i]; });
+      day.stops = [...morning, ...afternoon];
     }
 
     // --- FILTRE FINAL GARANTI : barrières + enseigne propre + limite chaîne ---
