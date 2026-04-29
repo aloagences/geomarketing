@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.3 — 22 avril 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.4 — 22 avril 2026</span>
       </div>
     </header>
 
@@ -259,6 +259,14 @@
                     <span class="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Auto-détection si vide</span>
                   </label>
                   <input class="input-style border-red-200 focus:border-red-500 transition-colors duration-500" id="competitors" type="text" placeholder="Ex: Aldi, Carrefour..." />
+                </div>
+
+                <div class="col-span-1 md:col-span-2 border-l-4 border-green-500 pl-3 py-1 bg-green-50 rounded-r-lg">
+                  <label for="priorityCities" class="block text-sm font-bold text-green-800 mb-1 flex items-center justify-between">
+                    <span class="flex items-center"><i data-lucide="map-pin-plus" class="w-4 h-4 mr-1"></i> Villes / quartiers à prioriser</span>
+                    <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Optionnel</span>
+                  </label>
+                  <input class="input-style border-green-200 focus:border-green-500" id="priorityCities" type="text" placeholder="Ex: Centre-ville, Quartier des Halles, Pamiers…" />
                 </div>
 
                 <div class="col-span-1 md:col-span-2 border-l-4 border-orange-500 pl-3 py-1 bg-orange-50 rounded-r-lg">

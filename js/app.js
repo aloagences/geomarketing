@@ -58,6 +58,7 @@ function initDomRefs() {
   inputRefs.competitors = document.getElementById('competitors');
   inputRefs.excludedCities = document.getElementById('excludedCities');
   inputRefs.ownBrand = document.getElementById('ownBrand');
+  inputRefs.priorityCities = document.getElementById('priorityCities');
 }
 
 // ========================================
@@ -742,12 +743,22 @@ async function handleGenerate() {
       }
     }
 
-    // --- Tri POIs ---
+    // --- Villes / quartiers prioritaires ---
+    const priorityList = (inputRefs.priorityCities?.value || '').trim().toLowerCase()
+      .split(',').map(c => c.trim()).filter(Boolean);
+
+    // --- Tri POIs : prioritaires d'abord, puis marchés, puis local, puis distance ---
     filteredPOIs.sort((a, b) => {
+      const aAddr = a.address.toLowerCase();
+      const bAddr = b.address.toLowerCase();
+      const aPriority = priorityList.length > 0 && priorityList.some(p => aAddr.includes(p) || a.name.toLowerCase().includes(p));
+      const bPriority = priorityList.length > 0 && priorityList.some(p => bAddr.includes(p) || b.name.toLowerCase().includes(p));
+      if (aPriority && !bPriority) return -1;
+      if (!aPriority && bPriority) return 1;
       if (a.type === 'market' && b.type !== 'market') return -1;
       if (b.type === 'market' && a.type !== 'market') return 1;
-      const aLocal = a.address.toLowerCase().includes(targetCity.toLowerCase()) && parseFloat(a.distance) <= 2.0;
-      const bLocal = b.address.toLowerCase().includes(targetCity.toLowerCase()) && parseFloat(b.distance) <= 2.0;
+      const aLocal = aAddr.includes(targetCity.toLowerCase()) && parseFloat(a.distance) <= 2.0;
+      const bLocal = bAddr.includes(targetCity.toLowerCase()) && parseFloat(b.distance) <= 2.0;
       if (aLocal && !bLocal) return -1;
       if (!aLocal && bLocal) return 1;
       return parseFloat(a.distance) - parseFloat(b.distance);
@@ -777,6 +788,9 @@ async function handleGenerate() {
       : 'CONCURRENTS: Aucun trouvé dans le périmètre.';
 
     const exclusionInstruction = [
+      priorityList.length > 0
+        ? `ZONES PRIORITAIRES : concentre OBLIGATOIREMENT au moins 50% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître en premier dans chaque journée.`
+        : '',
       excludedList.length > 0
         ? `INTERDICTION ABSOLUE : aucun arrêt dans ${excludedList.join(', ').toUpperCase()} ni dans aucune adresse contenant ces noms.`
         : 'Ne traverse PAS les fleuves majeurs.',
@@ -1007,8 +1021,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             filter(p) && (isSchoolDay || p.type !== 'school')
           );
 
+          const inPriority = (p) => priorityList.length > 0 && priorityList.some(pr =>
+            p.address.toLowerCase().includes(pr) || p.name.toLowerCase().includes(pr)
+          );
+
+          // 0. Zone prioritaire + type utile — en tête absolue
+          let idx = priorityList.length > 0
+            ? findFallback(p => inPriority(p) && USEFUL_TYPES.includes(p.type) && canUse(p.name) && !usedThisDay.has(p.name))
+            : -1;
           // 1. Transport public (arrêt bus/tram/gare) — toujours trouvable
-          let idx = findFallback(p => p.type === 'transport' && canUse(p.name) && !usedThisDay.has(p.name));
+          if (idx === -1) idx = findFallback(p => p.type === 'transport' && canUse(p.name) && !usedThisDay.has(p.name));
           // 2. Même type, même ville, quota non atteint
           if (idx === -1) idx = findFallback(p => p.type === stop.type && p.address.toLowerCase().includes(targetCity.toLowerCase()) && canUse(p.name) && !usedThisDay.has(p.name));
           // 3. Type utile, même ville, quota non atteint
