@@ -747,18 +747,55 @@ async function handleGenerate() {
     const priorityList = (inputRefs.priorityCities?.value || '').trim().toLowerCase()
       .split(',').map(c => c.trim()).filter(Boolean);
 
+    // Normalisation : retire tirets et accents pour comparaison robuste
+    // "Nogent le Roi" (user) ≡ "Nogent-le-Roi" (OSM)
+    const normStr = s => s.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // accents
+      .replace(/-/g, ' ')                               // tirets → espaces
+      .replace(/\s+/g, ' ').trim();
+
+    const normPriorityList = priorityList.map(normStr);
+
+    const inPriorityZone = (name = '', address = '') => {
+      const nName = normStr(name);
+      const nAddr = normStr(address);
+      return normPriorityList.some(p => nAddr.includes(p) || nName.includes(p));
+    };
+
+    // Fetch POIs dédiés pour chaque ville prioritaire (au cas où hors rayon principal)
+    if (priorityList.length > 0) {
+      setProgress('Recherche dans les zones prioritaires…', 48);
+      for (const city of priorityList) {
+        try {
+          // Géocoder la ville prioritaire
+          const geoRes = await fetch(
+            `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(city)}&type=municipality&limit=1`
+          );
+          const geoData = await geoRes.json();
+          if (!geoData.features?.[0]) continue;
+          const [cLng, cLat] = geoData.features[0].geometry.coordinates;
+          // Overpass rapide 3km autour de la ville
+          const cityPOIs = await fetchRealPOIs(cLat, cLng, 3);
+          const newPOIs = cityPOIs.filter(p =>
+            !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
+            !isBlocked(p.name, p.address, p.lat, p.lng)
+          );
+          filteredPOIs.push(...newPOIs);
+          console.log(`[Priorité] ${city} → ${newPOIs.length} POI(s) ajoutés`);
+        } catch { /* continuer */ }
+      }
+    }
+
     // --- Tri POIs : prioritaires d'abord, puis marchés, puis local, puis distance ---
     filteredPOIs.sort((a, b) => {
-      const aAddr = a.address.toLowerCase();
-      const bAddr = b.address.toLowerCase();
-      const aPriority = priorityList.length > 0 && priorityList.some(p => aAddr.includes(p) || a.name.toLowerCase().includes(p));
-      const bPriority = priorityList.length > 0 && priorityList.some(p => bAddr.includes(p) || b.name.toLowerCase().includes(p));
+      const aPriority = inPriorityZone(a.name, a.address);
+      const bPriority = inPriorityZone(b.name, b.address);
       if (aPriority && !bPriority) return -1;
       if (!aPriority && bPriority) return 1;
       if (a.type === 'market' && b.type !== 'market') return -1;
       if (b.type === 'market' && a.type !== 'market') return 1;
-      const aLocal = aAddr.includes(targetCity.toLowerCase()) && parseFloat(a.distance) <= 2.0;
-      const bLocal = bAddr.includes(targetCity.toLowerCase()) && parseFloat(b.distance) <= 2.0;
+      const aLocal = normStr(a.address).includes(normStr(targetCity)) && parseFloat(a.distance) <= 2.0;
+      const bLocal = normStr(b.address).includes(normStr(targetCity)) && parseFloat(b.distance) <= 2.0;
       if (aLocal && !bLocal) return -1;
       if (!aLocal && bLocal) return 1;
       return parseFloat(a.distance) - parseFloat(b.distance);
@@ -1099,11 +1136,8 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     // --- ENFORCEMENT ZONES PRIORITAIRES : 30% minimum par journée ---
     // L'IA peut ignorer les instructions → on force en post-processing
+    // inPriorityZone est déjà défini plus haut avec normalisation tirets/accents
     if (priorityList.length > 0) {
-      // POIs situés dans les zones prioritaires (adresse ou nom contient le mot-clé)
-      const inPriorityZone = (name = '', address = '') =>
-        priorityList.some(pr => address.toLowerCase().includes(pr) || name.toLowerCase().includes(pr));
-
       const priorityPOIs = filteredPOIs.filter(p => inPriorityZone(p.name, p.address));
 
       for (const day of data.dailyPlans) {
