@@ -789,7 +789,7 @@ async function handleGenerate() {
 
     const exclusionInstruction = [
       priorityList.length > 0
-        ? `ZONES PRIORITAIRES : concentre OBLIGATOIREMENT au moins 50% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître en premier dans chaque journée.`
+        ? `ZONES PRIORITAIRES : place OBLIGATOIREMENT au moins 30% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître chaque journée.`
         : '',
       excludedList.length > 0
         ? `INTERDICTION ABSOLUE : aucun arrêt dans ${excludedList.join(', ').toUpperCase()} ni dans aucune adresse contenant ces noms.`
@@ -1093,6 +1093,56 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         if (!hasRealAddress && stop.lat && stop.lng) {
           const realAddr = await reverseGeocodeBAN(stop.lat, stop.lng);
           if (realAddr) stop.address = realAddr;
+        }
+      }
+    }
+
+    // --- ENFORCEMENT ZONES PRIORITAIRES : 30% minimum par journée ---
+    // L'IA peut ignorer les instructions → on force en post-processing
+    if (priorityList.length > 0) {
+      // POIs situés dans les zones prioritaires (adresse ou nom contient le mot-clé)
+      const inPriorityZone = (name = '', address = '') =>
+        priorityList.some(pr => address.toLowerCase().includes(pr) || name.toLowerCase().includes(pr));
+
+      const priorityPOIs = filteredPOIs.filter(p => inPriorityZone(p.name, p.address));
+
+      for (const day of data.dailyPlans) {
+        if (!day.stops || day.stops.length === 0) continue;
+
+        const total = day.stops.length;
+        const targetCount = Math.ceil(total * 0.30); // 30% minimum
+        const currentCount = day.stops.filter(s => inPriorityZone(s.locationName, s.address)).length;
+        const deficit = targetCount - currentCount;
+
+        if (deficit <= 0) continue; // Quota déjà atteint
+
+        // POIs prioritaires non encore utilisés ce jour
+        const usedNames = new Set(day.stops.map(s => s.locationName));
+        const candidates = priorityPOIs.filter(p => !usedNames.has(p.name));
+
+        // Remplacer des stops non-prioritaires (jamais les concurrents) par des POIs prioritaires
+        let replaced = 0;
+        for (let i = day.stops.length - 1; i >= 0 && replaced < deficit && replaced < candidates.length; i--) {
+          const stop = day.stops[i];
+          if (inPriorityZone(stop.locationName, stop.address)) continue; // déjà prioritaire
+          if (stop.type === 'competitor') continue; // ne jamais toucher les concurrents
+          const poi = candidates[replaced];
+          const savedTime = stop.time;
+          Object.assign(stop, {
+            locationName: poi.name,
+            address: poi.address,
+            lat: poi.lat,
+            lng: poi.lng,
+            type: poi.type,
+            source: 'ZONE PRIORITAIRE',
+            marketDays: poi.marketDays || [],
+          });
+          stop.time = savedTime; // conserver le créneau horaire
+          replaced++;
+        }
+
+        if (replaced > 0) {
+          console.log(`[Priorité] ${day.day} : ${replaced} arrêt(s) replacé(s) dans ${priorityList.join(', ')}`);
         }
       }
     }
