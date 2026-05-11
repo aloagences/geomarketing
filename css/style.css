@@ -63,3 +63,18 @@ body {
 .input-invalid {
   border-color: #ef4444 !important;
 }
+
+/* ---- Street Marketing piéton ---- */
+.sm-stop-card {
+  transition: box-shadow 0.15s;
+}
+.sm-stop-card:hover {
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.18);
+}
+
+@media print {
+  .sm-stop-card {
+    border-color: #a5f3fc;
+    background: #f0fdfe !important;
+  }
+}

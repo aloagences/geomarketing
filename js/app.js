@@ -59,6 +59,8 @@ function initDomRefs() {
   inputRefs.excludedCities = document.getElementById('excludedCities');
   inputRefs.ownBrand = document.getElementById('ownBrand');
   inputRefs.priorityCities = document.getElementById('priorityCities');
+  inputRefs.smCity = document.getElementById('smCity');
+  inputRefs.smTeamSize = document.getElementById('smTeamSize');
 }
 
 // ========================================
@@ -313,6 +315,40 @@ function renderStopHTML(stop, distBadge) {
           <p class="text-[11px] text-blue-500 mt-1">L'adresse sera vérifiée et la distance recalculée via BAN.</p>
         </div>
 
+      </div>
+    </div>`;
+}
+
+// ========================================
+// RENDU ARRÊT PIÉTON STREET MARKETING
+// ========================================
+
+const SM_TYPE_ICONS = {
+  pedestrian: { icon: 'footprints',     color: 'text-cyan-600' },
+  square:     { icon: 'landmark',       color: 'text-cyan-700' },
+  transport:  { icon: 'train',          color: 'text-blue-500' },
+  market:     { icon: 'shopping-basket',color: 'text-cyan-500' },
+  shopping:   { icon: 'shopping-bag',   color: 'text-cyan-600' },
+  culture:    { icon: 'palette',        color: 'text-teal-500' },
+  park:       { icon: 'trees',          color: 'text-teal-600' },
+};
+
+function renderSmStopHTML(stop) {
+  const cfg = SM_TYPE_ICONS[stop.type] || { icon: 'map-pin', color: 'text-cyan-400' };
+  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
+  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+  return `
+    <div class="sm-stop-card flex items-center p-4 bg-white rounded-2xl border border-cyan-200 shadow-sm mb-3">
+      <div class="w-16 font-extrabold text-xl text-cyan-700 tracking-tight flex-shrink-0">${sanitize(stop.time || '')}</div>
+      <div class="flex-1 min-w-0 border-l-2 border-cyan-100 pl-4">
+        <div class="flex items-center flex-wrap gap-2">
+          <i data-lucide="${sanitize(cfg.icon)}" class="w-5 h-5 ${sanitize(cfg.color)} mr-1"></i>
+          <span class="font-extrabold text-cyan-900 text-base">${sanitize(street || stop.locationName)}</span>
+        </div>
+        <div class="text-sm text-cyan-600 mt-1 flex items-center flex-wrap gap-x-2">
+          <span class="font-medium">${sanitize(stop.locationName)}</span>
+          ${city ? `<span class="text-cyan-400">${sanitize(city)}</span>` : ''}
+        </div>
       </div>
     </div>`;
 }
@@ -836,6 +872,25 @@ async function handleGenerate() {
         : '',
     ].filter(Boolean).join(' ');
 
+    // --- Street Marketing couplé ---
+    const smDays = getSmDays(); // ISO dates sélectionnées
+    const smCityRaw = (inputRefs.smCity?.value || '').trim() || targetCity;
+    const smTeamSize = parseInt(inputRefs.smTeamSize?.value || '2');
+    const smActive = smDays.length > 0;
+
+    // Géocoder la ville SM pour contraindre le véhicule à rester proche
+    let smCityCoords = null;
+    if (smActive) {
+      try {
+        const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(smCityRaw)}&type=municipality&limit=1`);
+        const d = await r.json();
+        if (d.features?.[0]) {
+          const [lng, lat] = d.features[0].geometry.coordinates;
+          smCityCoords = { lat, lng };
+        }
+      } catch { /* continuer sans */ }
+    }
+
     // --- Horaires par jour (personnalisés ou par défaut) ---
     const perDayTimes = [];
     let perDayTimesPrompt = '';
@@ -847,7 +902,9 @@ async function handleGenerate() {
       const mornLabel = t.hasMorning ? `Matin ${t.mornStart}-${t.mornEnd}` : 'PAS DE MATIN (0 arrêts)';
       const aftLabel = t.hasAfternoon ? `Aprem ${t.aftStart}-${t.aftEnd}` : 'PAS D\'APRÈS-MIDI (0 arrêts)';
       const holidayTag = isHoliday ? ' [VACANCES SCOLAIRES - PAS D\'ÉCOLE]' : '';
-      perDayTimesPrompt += `  - ${datesList[i]} : ${mornLabel}, ${aftLabel}${holidayTag}\n`;
+      const isSmDay = smActive && smDays.includes(datesISO[i]);
+      const smTag = isSmDay ? ` [STREET MARKETING : équipe piétonne ${smTeamSize}p à ${smCityRaw}]` : '';
+      perDayTimesPrompt += `  - ${datesList[i]} : ${mornLabel}, ${aftLabel}${holidayTag}${smTag}\n`;
     }
 
     setProgress('Analyse IA Stratégique...', 60);
@@ -874,7 +931,8 @@ CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient entre 12h00 et 14
 ${competitorInstruction}
 ANTI-DOUBLON: Aucune adresse répétée.
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
-JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
+${smActive ? `STREET MARKETING COUPLÉ: Les jours marqués [STREET MARKETING] le VÉHICULE doit concentrer TOUS ses arrêts dans un rayon de 3 km autour du centre de ${smCityRaw}. Ces jours-là, génère AUSSI un tableau "smStops" (4 à 6 arrêts piétons) avec des rues commerçantes, places, hubs de transport ou marchés de ${smCityRaw}. Les smStops ont le même format que stops mais type parmi : pedestrian|square|transport|market.` : ''}
+JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}],"smStops":[]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
 
     const prompt = `Plan pour ${officialBrand} depuis ${inputRefs.address.value}.\nHORAIRES PAR JOUR :\n${perDayTimesPrompt}\n${poiContext}`;
 
@@ -1181,6 +1239,93 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       }
     }
 
+    // --- STREET MARKETING : contrainte véhicule + arrêts piétons ---
+    if (smActive && smCityCoords) {
+      const SM_RADIUS_KM = 3;
+      const distKm = (lat1, lng1, lat2, lng2) => {
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLng = (lng2 - lng1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      };
+
+      // POIs piétons : rues commerçantes, places, transport, marchés — proches de la ville SM
+      const smPOIs = filteredPOIs.filter(p =>
+        distKm(smCityCoords.lat, smCityCoords.lng, p.lat, p.lng) <= SM_RADIUS_KM &&
+        ['transport', 'market', 'shopping', 'culture', 'park'].includes(p.type)
+      );
+
+      for (let idx = 0; idx < data.dailyPlans.length; idx++) {
+        const iso = datesISO[idx];
+        if (!smDays.includes(iso)) continue;
+        const day = data.dailyPlans[idx];
+
+        // 1. Forcer les arrêts VÉHICULE à rester dans 3 km autour de smCityCoords
+        if (day.stops?.length) {
+          const inRange = day.stops.filter(s => s.lat && s.lng && distKm(smCityCoords.lat, smCityCoords.lng, s.lat, s.lng) <= SM_RADIUS_KM);
+          // Si l'IA a bien placé les arrêts, les garder ; sinon réassigner depuis POIs SM
+          if (inRange.length < day.stops.length && smPOIs.length > 0) {
+            const usedSm = new Set(inRange.map(s => s.locationName));
+            let fill = smPOIs.filter(p => !usedSm.has(p.name));
+            day.stops = day.stops.map(stop => {
+              if (stop.lat && stop.lng && distKm(smCityCoords.lat, smCityCoords.lng, stop.lat, stop.lng) <= SM_RADIUS_KM) return stop;
+              const poi = fill.shift();
+              if (!poi) return stop; // garder si pas de remplacement dispo
+              return { ...poi, time: stop.time, source: 'OSM (SM zone)' };
+            });
+          }
+        }
+
+        // 2. Construire/enrichir smStops (arrêts piétons)
+        const rawSmStops = day.smStops || [];
+        const smUsed = new Set(rawSmStops.map(s => s.locationName));
+        const smFill = smPOIs.filter(p => !smUsed.has(p.name));
+
+        // Garder les smStops IA valides (dans le rayon), compléter si besoin
+        const validSmStops = rawSmStops.filter(s =>
+          !s.lat || !s.lng || distKm(smCityCoords.lat, smCityCoords.lng, s.lat, s.lng) <= SM_RADIUS_KM
+        );
+        while (validSmStops.length < 5 && smFill.length > 0) {
+          const poi = smFill.shift();
+          validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
+        }
+
+        // Assigner des horaires répartis sur la journée
+        const t = perDayTimes[idx] || perDayTimes[0];
+        if (validSmStops.length > 0 && t) {
+          const slots = [];
+          if (t.hasMorning) {
+            const [mh, mm] = t.mornStart.split(':').map(Number);
+            const [meh, mem] = t.mornEnd.split(':').map(Number);
+            const totalMin = (meh * 60 + mem) - (mh * 60 + mm);
+            const mornCount = Math.min(Math.ceil(validSmStops.length / 2), validSmStops.length);
+            for (let k = 0; k < mornCount; k++) {
+              const minOffset = Math.round((totalMin / mornCount) * k);
+              const h = Math.floor((mh * 60 + mm + minOffset) / 60);
+              const m = (mh * 60 + mm + minOffset) % 60;
+              slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+            }
+          }
+          if (t.hasAfternoon) {
+            const [ah, am] = t.aftStart.split(':').map(Number);
+            const [aeh, aem] = t.aftEnd.split(':').map(Number);
+            const totalMin = (aeh * 60 + aem) - (ah * 60 + am);
+            const aftCount = validSmStops.length - slots.length;
+            for (let k = 0; k < aftCount; k++) {
+              const minOffset = Math.round((totalMin / Math.max(aftCount, 1)) * k);
+              const h = Math.floor((ah * 60 + am + minOffset) / 60);
+              const m = (ah * 60 + am + minOffset) % 60;
+              slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+            }
+          }
+          validSmStops.forEach((s, k) => { s.time = slots[k] || s.time || '10:00'; });
+        }
+
+        day.smStops = validSmStops;
+      }
+    }
+
     // --- SMART SCHEDULING : marchés selon jours OSM, centres commerciaux aprem mer/sam ---
     const FR_DAYS = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
 
@@ -1299,14 +1444,43 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         </div>`;
       }
 
+      // Section Street Marketing piéton (jours couplés SM)
+      const isSmDay = smActive && smDays.includes(datesISO[idx]);
+      let smSectionHtml = '';
+      if (isSmDay && day.smStops?.length > 0) {
+        const smStopsHtml = day.smStops.map(s => renderSmStopHTML(s)).join('');
+        smSectionHtml = `
+          <div class="mt-6 border-t-2 border-cyan-200 pt-5">
+            <div class="flex items-center gap-2 mb-3">
+              <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
+              <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
+            </div>
+            <div class="bg-cyan-50 p-4 rounded-3xl border border-cyan-200">${smStopsHtml}</div>
+          </div>`;
+      } else if (isSmDay) {
+        smSectionHtml = `
+          <div class="mt-6 border-t-2 border-cyan-200 pt-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
+              <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
+              <span class="text-xs text-cyan-400 italic ml-2">Arrêts piétons non disponibles — cibler rues commerçantes du centre</span>
+            </div>
+          </div>`;
+      }
+
+      const smBadgeHtml = isSmDay ? `<span class="bg-cyan-50 border border-cyan-300 text-cyan-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center shadow-sm gap-1.5">
+        <i data-lucide="footprints" class="w-4 h-4"></i> SM Couplé
+      </span>` : '';
+
       plansHtml += `
         <div id="day-card-${idx}" class="mb-10 page-break-inside-avoid px-2">
-          <div class="flex flex-col md:flex-row md:justify-between md:items-end mb-4 pb-3 border-b border-gray-200 gap-4">
+          <div class="flex flex-col md:flex-row md:justify-between md:items-end mb-4 pb-3 border-b ${isSmDay ? 'border-cyan-200' : 'border-gray-200'} gap-4">
             <div class="flex flex-col">
-              <h4 class="font-extrabold text-3xl text-[#0E2C59] capitalize mb-1">${sanitize(day.day)}</h4>
-              <span class="text-sm font-bold uppercase text-gray-500 tracking-widest">${sanitize(day.role || 'VÉHICULE')}</span>
+              <h4 class="font-extrabold text-3xl ${isSmDay ? 'text-cyan-900' : 'text-[#0E2C59]'} capitalize mb-1">${sanitize(day.day)}</h4>
+              <span class="text-sm font-bold uppercase ${isSmDay ? 'text-cyan-600' : 'text-gray-500'} tracking-widest">${sanitize(day.role || 'VÉHICULE')}</span>
             </div>
             <div class="flex flex-wrap gap-2 items-center">
+              ${smBadgeHtml}
               ${weatherBadgeHtml}
               ${att.hasMorning !== false ? `<span class="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center shadow-sm">
                 <i data-lucide="sun" class="w-4 h-4 mr-1.5"></i> ${sanitize(att.startMatin)} - ${sanitize(att.endMatin)}
@@ -1319,6 +1493,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           </div>
           ${weatherAlert}
           <div class="bg-[#F8FAFC] p-4 rounded-3xl">${stopsHtmlArr.join('')}</div>
+          ${smSectionHtml}
         </div>`;
     }
 
@@ -1453,7 +1628,59 @@ function rebuildPerDaySchedule() {
   }
 
   container.innerHTML = html;
+
+  // Reconstruire aussi le sélecteur de jours SM
+  rebuildSmDaySelector(startDate, duration);
+
   lucide.createIcons();
+}
+
+/**
+ * Reconstruit le sélecteur de jours Street Marketing.
+ * Affiche les jours de la campagne sous forme de cases à cocher (max 2).
+ */
+function rebuildSmDaySelector(startDate, duration) {
+  const selector = document.getElementById('smDaySelector');
+  if (!selector) return;
+  if (!startDate || duration < 1) {
+    selector.innerHTML = '<p class="text-xs text-gray-400 italic">Renseignez la date de début et la durée pour voir les jours.</p>';
+    return;
+  }
+  // Conserver les jours déjà cochés
+  const checked = new Set(
+    [...selector.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value)
+  );
+  const startObj = new Date(startDate);
+  let html = '<div class="flex flex-wrap gap-2">';
+  for (let i = 0; i < duration; i++) {
+    const d = new Date(startObj);
+    d.setDate(d.getDate() + i);
+    const iso = d.toISOString().split('T')[0];
+    const label = d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    const isChecked = checked.has(iso) ? 'checked' : '';
+    html += `
+      <label class="flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg border border-cyan-200 bg-white hover:bg-cyan-50 text-xs font-medium text-cyan-900 transition-colors sm-day-label">
+        <input type="checkbox" class="sm-day-cb accent-cyan-600" value="${iso}" ${isChecked}
+               onchange="enforceSMDayLimit(this)" />
+        ${sanitize(label)}
+      </label>`;
+  }
+  html += '</div>';
+  selector.innerHTML = html;
+}
+
+/** Empêche de cocher plus de 2 jours SM */
+function enforceSMDayLimit(cb) {
+  const all = document.querySelectorAll('.sm-day-cb:checked');
+  if (all.length > 2) {
+    cb.checked = false;
+    showMessage('Maximum 2 jours de Street Marketing (non consécutifs recommandés).', 'error');
+  }
+}
+
+/** Retourne les dates ISO des jours SM sélectionnés */
+function getSmDays() {
+  return [...document.querySelectorAll('.sm-day-cb:checked')].map(cb => cb.value);
 }
 
 /**

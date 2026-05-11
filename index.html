@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.6 — 4 mai 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.7 — 11 mai 2026</span>
       </div>
     </header>
 
@@ -312,6 +312,55 @@
                       <p class="text-xs text-indigo-600 mb-3">Modifiez uniquement les jours qui ont des horaires spéciaux. Les autres garderont les horaires par défaut ci-dessus.</p>
                       <div id="perDayScheduleContainer" class="space-y-2">
                         <p class="text-xs text-gray-400 italic">Renseignez la date de début et la durée pour voir les jours.</p>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+
+                <!-- Street Marketing couplé -->
+                <div class="col-span-1 md:col-span-2">
+                  <details id="smDetails" class="group border-2 border-cyan-400 rounded-xl overflow-hidden bg-cyan-50/50">
+                    <summary class="p-3 cursor-pointer flex items-center justify-between select-none hover:bg-cyan-100/50 transition-colors">
+                      <div class="flex items-center gap-2">
+                        <i data-lucide="footprints" class="w-4 h-4 text-cyan-700"></i>
+                        <span class="text-sm font-bold text-cyan-900">Couplage Street Marketing (piéton)</span>
+                        <span class="text-[10px] bg-cyan-200 text-cyan-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">Optionnel</span>
+                      </div>
+                      <div class="bg-cyan-200 p-1.5 rounded-full text-cyan-700 group-open:rotate-180 transition-transform duration-300 flex-shrink-0">
+                        <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                      </div>
+                    </summary>
+                    <div class="px-4 pb-4 pt-3 border-t border-cyan-200 bg-white/70 space-y-3">
+                      <p class="text-xs text-cyan-700">L'équipe piétonne cible les rues commerçantes, places et marchés. Le véhicule reste à proximité pour soutenir l'équipe (stand lourd). Sélectionnez 1 ou 2 jours non consécutifs.</p>
+
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label class="block text-xs font-bold text-cyan-800 mb-1">
+                            <i data-lucide="map-pin" class="w-3 h-3 inline mr-1"></i>Ville du Street Marketing
+                          </label>
+                          <input class="input-style border-cyan-300 focus:border-cyan-500 text-sm" id="smCity" type="text"
+                                 placeholder="Défaut : ville de départ" />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-bold text-cyan-800 mb-1">
+                            <i data-lucide="users" class="w-3 h-3 inline mr-1"></i>Effectif piéton
+                          </label>
+                          <select class="input-style border-cyan-300 focus:border-cyan-500 text-sm" id="smTeamSize">
+                            <option value="2">2 personnes</option>
+                            <option value="3">3 personnes</option>
+                            <option value="4">4 personnes</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label class="block text-xs font-bold text-cyan-800 mb-2">
+                          <i data-lucide="calendar-days" class="w-3 h-3 inline mr-1"></i>Jours avec Street Marketing
+                          <span class="text-[10px] font-normal text-cyan-600 ml-1">(max 2 jours non consécutifs)</span>
+                        </label>
+                        <div id="smDaySelector" class="text-xs text-gray-400 italic">
+                          Renseignez la date de début et la durée pour voir les jours.
+                        </div>
                       </div>
                     </div>
                   </details>
