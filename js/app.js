@@ -885,11 +885,11 @@ async function handleGenerate() {
     const smActive = smDays.length > 0;
     const smTimes = {
       hasMorning:   inputRefs.smHasMorning?.checked !== false,
-      mornStart:    inputRefs.smMornStart?.value || '09:00',
-      mornEnd:      inputRefs.smMornEnd?.value   || '12:30',
+      mornStart:    inputRefs.smMornStart?.value || '10:00',
+      mornEnd:      inputRefs.smMornEnd?.value   || '13:00',
       hasAfternoon: inputRefs.smHasAfternoon?.checked !== false,
       aftStart:     inputRefs.smAftStart?.value  || '14:00',
-      aftEnd:       inputRefs.smAftEnd?.value    || '18:00',
+      aftEnd:       inputRefs.smAftEnd?.value    || '17:00',
     };
 
     // Géocoder la ville SM pour contraindre le véhicule à rester proche
@@ -1674,16 +1674,34 @@ function rebuildSmDaySelector(startDate, duration) {
   const checked = new Set(
     [...selector.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value)
   );
+
+  // Étendre aux semaines complètes (lun→dim) couvrant la campagne
   const startObj = new Date(startDate);
+  const endObj = new Date(startDate);
+  endObj.setDate(endObj.getDate() + duration - 1);
+
+  // Reculer au lundi de la semaine de début
+  const weekStart = new Date(startObj);
+  const dow = weekStart.getDay(); // 0=dim, 1=lun, ...
+  weekStart.setDate(weekStart.getDate() - (dow === 0 ? 6 : dow - 1));
+
+  // Avancer au dimanche de la semaine de fin
+  const weekEnd = new Date(endObj);
+  const dow2 = weekEnd.getDay();
+  weekEnd.setDate(weekEnd.getDate() + (dow2 === 0 ? 0 : 7 - dow2));
+
   let html = '<div class="flex flex-wrap gap-2">';
-  for (let i = 0; i < duration; i++) {
-    const d = new Date(startObj);
-    d.setDate(d.getDate() + i);
+  for (let d = new Date(weekStart); d <= weekEnd; d.setDate(d.getDate() + 1)) {
     const iso = d.toISOString().split('T')[0];
     const label = d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
     const isChecked = checked.has(iso) ? 'checked' : '';
+    // Griser les jours hors campagne (visuellement, mais sélectionnables)
+    const inCampaign = d >= startObj && d <= endObj;
+    const style = inCampaign
+      ? 'border-cyan-200 bg-white hover:bg-cyan-50 text-cyan-900'
+      : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-400';
     html += `
-      <label class="flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg border border-cyan-200 bg-white hover:bg-cyan-50 text-xs font-medium text-cyan-900 transition-colors sm-day-label">
+      <label class="flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg border ${style} text-xs font-medium transition-colors sm-day-label" title="${inCampaign ? 'Jour de campagne' : 'Hors campagne'}">
         <input type="checkbox" class="sm-day-cb accent-cyan-600" value="${iso}" ${isChecked}
                onchange="enforceSMDayLimit(this)" />
         ${sanitize(label)}
