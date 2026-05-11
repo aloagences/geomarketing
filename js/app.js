@@ -61,6 +61,12 @@ function initDomRefs() {
   inputRefs.priorityCities = document.getElementById('priorityCities');
   inputRefs.smCity = document.getElementById('smCity');
   inputRefs.smTeamSize = document.getElementById('smTeamSize');
+  inputRefs.smHasMorning = document.getElementById('smHasMorning');
+  inputRefs.smMornStart = document.getElementById('smMornStart');
+  inputRefs.smMornEnd = document.getElementById('smMornEnd');
+  inputRefs.smHasAfternoon = document.getElementById('smHasAfternoon');
+  inputRefs.smAftStart = document.getElementById('smAftStart');
+  inputRefs.smAftEnd = document.getElementById('smAftEnd');
 }
 
 // ========================================
@@ -877,6 +883,14 @@ async function handleGenerate() {
     const smCityRaw = (inputRefs.smCity?.value || '').trim() || targetCity;
     const smTeamSize = parseInt(inputRefs.smTeamSize?.value || '2');
     const smActive = smDays.length > 0;
+    const smTimes = {
+      hasMorning:   inputRefs.smHasMorning?.checked !== false,
+      mornStart:    inputRefs.smMornStart?.value || '09:00',
+      mornEnd:      inputRefs.smMornEnd?.value   || '12:30',
+      hasAfternoon: inputRefs.smHasAfternoon?.checked !== false,
+      aftStart:     inputRefs.smAftStart?.value  || '14:00',
+      aftEnd:       inputRefs.smAftEnd?.value    || '18:00',
+    };
 
     // Géocoder la ville SM pour contraindre le véhicule à rester proche
     let smCityCoords = null;
@@ -1291,25 +1305,26 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
         }
 
-        // Assigner des horaires répartis sur la journée
-        const t = perDayTimes[idx] || perDayTimes[0];
-        if (validSmStops.length > 0 && t) {
+        // Assigner des horaires répartis sur la journée (selon smTimes formulaire)
+        if (validSmStops.length > 0) {
           const slots = [];
-          if (t.hasMorning) {
-            const [mh, mm] = t.mornStart.split(':').map(Number);
-            const [meh, mem] = t.mornEnd.split(':').map(Number);
+          if (smTimes.hasMorning) {
+            const [mh, mm] = smTimes.mornStart.split(':').map(Number);
+            const [meh, mem] = smTimes.mornEnd.split(':').map(Number);
             const totalMin = (meh * 60 + mem) - (mh * 60 + mm);
-            const mornCount = Math.min(Math.ceil(validSmStops.length / 2), validSmStops.length);
+            const mornCount = smTimes.hasAfternoon
+              ? Math.min(Math.ceil(validSmStops.length / 2), validSmStops.length)
+              : validSmStops.length;
             for (let k = 0; k < mornCount; k++) {
-              const minOffset = Math.round((totalMin / mornCount) * k);
+              const minOffset = Math.round((totalMin / Math.max(mornCount, 1)) * k);
               const h = Math.floor((mh * 60 + mm + minOffset) / 60);
               const m = (mh * 60 + mm + minOffset) % 60;
               slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
             }
           }
-          if (t.hasAfternoon) {
-            const [ah, am] = t.aftStart.split(':').map(Number);
-            const [aeh, aem] = t.aftEnd.split(':').map(Number);
+          if (smTimes.hasAfternoon) {
+            const [ah, am] = smTimes.aftStart.split(':').map(Number);
+            const [aeh, aem] = smTimes.aftEnd.split(':').map(Number);
             const totalMin = (aeh * 60 + aem) - (ah * 60 + am);
             const aftCount = validSmStops.length - slots.length;
             for (let k = 0; k < aftCount; k++) {
@@ -1319,7 +1334,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
             }
           }
-          validSmStops.forEach((s, k) => { s.time = slots[k] || s.time || '10:00'; });
+          validSmStops.forEach((s, k) => { s.time = slots[k] || s.time || smTimes.mornStart || '09:00'; });
         }
 
         day.smStops = validSmStops;
@@ -1449,18 +1464,27 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       let smSectionHtml = '';
       if (isSmDay && day.smStops?.length > 0) {
         const smStopsHtml = day.smStops.map(s => renderSmStopHTML(s)).join('');
+        const smMornBadge = smTimes.hasMorning
+          ? `<span class="bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
+               <i data-lucide="sun" class="w-3 h-3"></i> ${sanitize(smTimes.mornStart)} - ${sanitize(smTimes.mornEnd)}
+             </span>` : '';
+        const smAftBadge = smTimes.hasAfternoon
+          ? `<span class="bg-orange-50 border border-orange-200 text-orange-800 px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1">
+               <i data-lucide="sunset" class="w-3 h-3"></i> ${sanitize(smTimes.aftStart)} - ${sanitize(smTimes.aftEnd)}
+             </span>` : '';
         smSectionHtml = `
           <div class="mt-6 border-t-2 border-cyan-200 pt-5">
-            <div class="flex items-center gap-2 mb-3">
+            <div class="flex flex-wrap items-center gap-2 mb-3">
               <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
               <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
+              ${smMornBadge}${smAftBadge}
             </div>
             <div class="bg-cyan-50 p-4 rounded-3xl border border-cyan-200">${smStopsHtml}</div>
           </div>`;
       } else if (isSmDay) {
         smSectionHtml = `
           <div class="mt-6 border-t-2 border-cyan-200 pt-4">
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
               <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
               <span class="text-xs text-cyan-400 italic ml-2">Arrêts piétons non disponibles — cibler rues commerçantes du centre</span>

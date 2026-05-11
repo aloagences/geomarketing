@@ -362,6 +362,51 @@
                           Renseignez la date de début et la durée pour voir les jours.
                         </div>
                       </div>
+
+                      <!-- Horaires SM -->
+                      <div>
+                        <label class="block text-xs font-bold text-cyan-800 mb-2">
+                          <i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>Horaires de l'équipe piétonne
+                        </label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <!-- Matin -->
+                          <div class="bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                            <div class="flex items-center gap-2 mb-2">
+                              <input type="checkbox" id="smHasMorning" checked
+                                     class="accent-cyan-600 w-4 h-4 cursor-pointer"
+                                     onchange="document.getElementById('smMornTimes').style.display=this.checked?'flex':'none'" />
+                              <label for="smHasMorning" class="text-xs font-bold text-amber-800 cursor-pointer flex items-center gap-1">
+                                <i data-lucide="sun" class="w-3 h-3"></i> Matin
+                              </label>
+                            </div>
+                            <div id="smMornTimes" class="flex items-center gap-1.5">
+                              <input type="time" id="smMornStart" value="09:00"
+                                     class="input-style border-amber-300 text-sm px-2 py-1.5 flex-1 min-w-0" />
+                              <span class="text-amber-600 font-bold text-xs">→</span>
+                              <input type="time" id="smMornEnd" value="12:30"
+                                     class="input-style border-amber-300 text-sm px-2 py-1.5 flex-1 min-w-0" />
+                            </div>
+                          </div>
+                          <!-- Après-midi -->
+                          <div class="bg-orange-50/70 border border-orange-200 rounded-lg p-2.5">
+                            <div class="flex items-center gap-2 mb-2">
+                              <input type="checkbox" id="smHasAfternoon" checked
+                                     class="accent-cyan-600 w-4 h-4 cursor-pointer"
+                                     onchange="document.getElementById('smAftTimes').style.display=this.checked?'flex':'none'" />
+                              <label for="smHasAfternoon" class="text-xs font-bold text-orange-800 cursor-pointer flex items-center gap-1">
+                                <i data-lucide="sunset" class="w-3 h-3"></i> Après-midi
+                              </label>
+                            </div>
+                            <div id="smAftTimes" class="flex items-center gap-1.5">
+                              <input type="time" id="smAftStart" value="14:00"
+                                     class="input-style border-orange-300 text-sm px-2 py-1.5 flex-1 min-w-0" />
+                              <span class="text-orange-600 font-bold text-xs">→</span>
+                              <input type="time" id="smAftEnd" value="18:00"
+                                     class="input-style border-orange-300 text-sm px-2 py-1.5 flex-1 min-w-0" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </details>
                 </div>
