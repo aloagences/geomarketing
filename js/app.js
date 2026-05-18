@@ -798,40 +798,71 @@ async function handleGenerate() {
 
     const normPriorityList = priorityList.map(normStr);
 
-    const inPriorityZone = (name = '', address = '') => {
+    // Coordonnées des zones prioritaires (remplies après geocoding)
+    const priorityZoneCoords = []; // [{lat, lng}]
+
+    const distKmPriority = (lat1, lng1, lat2, lng2) => {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    };
+
+    // inPriorityZone : vérifie le flag, la proximité GPS, ou le texte
+    const inPriorityZone = (name = '', address = '', lat = null, lng = null, flagged = false) => {
+      if (flagged) return true;
+      if (lat !== null && lng !== null && priorityZoneCoords.length > 0) {
+        if (priorityZoneCoords.some(c => distKmPriority(c.lat, c.lng, lat, lng) <= 3)) return true;
+      }
       const nName = normStr(name);
       const nAddr = normStr(address);
       return normPriorityList.some(p => nAddr.includes(p) || nName.includes(p));
     };
 
-    // Fetch POIs dédiés pour chaque ville prioritaire (au cas où hors rayon principal)
+    // Fetch POIs dédiés pour chaque zone prioritaire
     if (priorityList.length > 0) {
       setProgress('Recherche dans les zones prioritaires…', 48);
       for (const city of priorityList) {
         try {
-          // Géocoder la ville prioritaire
+          // Geocoding sans restriction de type → accepte adresses, quartiers, villes
           const geoRes = await fetch(
-            `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(city)}&type=municipality&limit=1`
+            `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(city)}&limit=1`
           );
           const geoData = await geoRes.json();
-          if (!geoData.features?.[0]) continue;
+          if (!geoData.features?.[0]) {
+            console.warn(`[Priorité] geocoding échoué pour : ${city}`);
+            continue;
+          }
           const [cLng, cLat] = geoData.features[0].geometry.coordinates;
-          // Overpass rapide 3km autour de la ville
+          priorityZoneCoords.push({ lat: cLat, lng: cLng });
+
+          // Overpass 3km autour des coordonnées → marquer les POIs avec _priorityZone
           const cityPOIs = await fetchRealPOIs(cLat, cLng, 3);
+          cityPOIs.forEach(p => { p._priorityZone = true; });
+
           const newPOIs = cityPOIs.filter(p =>
             !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
             !isBlocked(p.name, p.address, p.lat, p.lng)
           );
+          // Mettre à jour ceux déjà présents dans filteredPOIs
+          cityPOIs.forEach(p => {
+            const existing = filteredPOIs.find(e => e.name === p.name && e.address === p.address);
+            if (existing) existing._priorityZone = true;
+          });
+
           filteredPOIs.push(...newPOIs);
-          console.log(`[Priorité] ${city} → ${newPOIs.length} POI(s) ajoutés`);
-        } catch { /* continuer */ }
+          console.log(`[Priorité] ${city} (${cLat.toFixed(4)},${cLng.toFixed(4)}) → ${newPOIs.length} POI(s) ajoutés, ${cityPOIs.length} marqués`);
+        } catch(e) {
+          console.warn(`[Priorité] erreur pour ${city}:`, e);
+        }
       }
     }
 
     // --- Tri POIs : prioritaires d'abord, puis marchés, puis local, puis distance ---
     filteredPOIs.sort((a, b) => {
-      const aPriority = inPriorityZone(a.name, a.address);
-      const bPriority = inPriorityZone(b.name, b.address);
+      const aPriority = inPriorityZone(a.name, a.address, a.lat, a.lng, a._priorityZone);
+      const bPriority = inPriorityZone(b.name, b.address, b.lat, b.lng, b._priorityZone);
       if (aPriority && !bPriority) return -1;
       if (!aPriority && bPriority) return 1;
       if (a.type === 'market' && b.type !== 'market') return -1;
@@ -868,7 +899,7 @@ async function handleGenerate() {
 
     const exclusionInstruction = [
       priorityList.length > 0
-        ? `ZONES PRIORITAIRES : place OBLIGATOIREMENT au moins 30% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître chaque journée.`
+        ? `ZONES PRIORITAIRES : inclure au moins 10% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître au moins 1 fois par journée.`
         : '',
       excludedList.length > 0
         ? `INTERDICTION ABSOLUE : aucun arrêt dans ${excludedList.join(', ').toUpperCase()} ni dans aucune adresse contenant ces noms.`
@@ -1130,9 +1161,8 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             filter(p) && (isSchoolDay || p.type !== 'school')
           );
 
-          const inPriority = (p) => priorityList.length > 0 && priorityList.some(pr =>
-            p.address.toLowerCase().includes(pr) || p.name.toLowerCase().includes(pr)
-          );
+          const inPriority = (p) => priorityList.length > 0 &&
+            inPriorityZone(p.name, p.address, p.lat, p.lng, p._priorityZone);
 
           // 0. Zone prioritaire + type utile — en tête absolue
           let idx = priorityList.length > 0
@@ -1207,17 +1237,22 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     // --- ENFORCEMENT ZONES PRIORITAIRES : 30% minimum par journée ---
-    // L'IA peut ignorer les instructions → on force en post-processing
-    // inPriorityZone est déjà défini plus haut avec normalisation tirets/accents
+    // Post-processing : garantir 10% des stops dans les zones prioritaires
     if (priorityList.length > 0) {
-      const priorityPOIs = filteredPOIs.filter(p => inPriorityZone(p.name, p.address));
+      const priorityPOIs = filteredPOIs.filter(p =>
+        inPriorityZone(p.name, p.address, p.lat, p.lng, p._priorityZone)
+      );
+
+      console.log(`[Priorité] ${priorityPOIs.length} POI(s) prioritaires disponibles`);
 
       for (const day of data.dailyPlans) {
         if (!day.stops || day.stops.length === 0) continue;
 
         const total = day.stops.length;
-        const targetCount = Math.ceil(total * 0.30); // 30% minimum
-        const currentCount = day.stops.filter(s => inPriorityZone(s.locationName, s.address)).length;
+        const targetCount = Math.max(1, Math.ceil(total * 0.10)); // 10% minimum, au moins 1
+        const currentCount = day.stops.filter(s =>
+          inPriorityZone(s.locationName, s.address, s.lat, s.lng)
+        ).length;
         const deficit = targetCount - currentCount;
 
         if (deficit <= 0) continue; // Quota déjà atteint
@@ -1226,12 +1261,17 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         const usedNames = new Set(day.stops.map(s => s.locationName));
         const candidates = priorityPOIs.filter(p => !usedNames.has(p.name));
 
+        if (candidates.length === 0) {
+          console.warn(`[Priorité] ${day.day} : aucun POI prioritaire disponible`);
+          continue;
+        }
+
         // Remplacer des stops non-prioritaires (jamais les concurrents) par des POIs prioritaires
         let replaced = 0;
         for (let i = day.stops.length - 1; i >= 0 && replaced < deficit && replaced < candidates.length; i--) {
           const stop = day.stops[i];
-          if (inPriorityZone(stop.locationName, stop.address)) continue; // déjà prioritaire
-          if (stop.type === 'competitor') continue; // ne jamais toucher les concurrents
+          if (inPriorityZone(stop.locationName, stop.address, stop.lat, stop.lng)) continue;
+          if (stop.type === 'competitor') continue;
           const poi = candidates[replaced];
           const savedTime = stop.time;
           Object.assign(stop, {
@@ -1243,12 +1283,12 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             source: 'ZONE PRIORITAIRE',
             marketDays: poi.marketDays || [],
           });
-          stop.time = savedTime; // conserver le créneau horaire
+          stop.time = savedTime;
           replaced++;
         }
 
         if (replaced > 0) {
-          console.log(`[Priorité] ${day.day} : ${replaced} arrêt(s) replacé(s) dans ${priorityList.join(', ')}`);
+          console.log(`[Priorité] ${day.day} : ${replaced}/${total} arrêt(s) en zone prioritaire`);
         }
       }
     }
