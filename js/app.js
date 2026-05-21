@@ -821,9 +821,13 @@ async function handleGenerate() {
     };
 
     // Fetch POIs dédiés pour chaque zone prioritaire
+    // poisByZone[i] = tableau de POIs appartenant à la zone i (pour enforcement par zone)
+    const poisByZone = [];
     if (priorityList.length > 0) {
       setProgress('Recherche dans les zones prioritaires…', 48);
-      for (const city of priorityList) {
+      for (let zi = 0; zi < priorityList.length; zi++) {
+        const city = priorityList[zi];
+        poisByZone.push([]); // initialiser zone i
         try {
           // Geocoding sans restriction de type → accepte adresses, quartiers, villes
           const geoRes = await fetch(
@@ -835,11 +839,16 @@ async function handleGenerate() {
             continue;
           }
           const [cLng, cLat] = geoData.features[0].geometry.coordinates;
-          priorityZoneCoords.push({ lat: cLat, lng: cLng });
+          priorityZoneCoords.push({ lat: cLat, lng: cLng, city });
 
-          // Overpass 3km autour des coordonnées → marquer les POIs avec _priorityZone
+          // Overpass 3km autour des coordonnées → marquer les POIs avec _priorityZone + index
           const cityPOIs = await fetchRealPOIs(cLat, cLng, 3);
-          cityPOIs.forEach(p => { p._priorityZone = true; });
+          cityPOIs.forEach(p => {
+            p._priorityZone = true;
+            // Ajouter index de zone (un POI peut appartenir à plusieurs zones)
+            if (!p._priorityZoneIdxs) p._priorityZoneIdxs = [];
+            if (!p._priorityZoneIdxs.includes(zi)) p._priorityZoneIdxs.push(zi);
+          });
 
           const newPOIs = cityPOIs.filter(p =>
             !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
@@ -848,11 +857,19 @@ async function handleGenerate() {
           // Mettre à jour ceux déjà présents dans filteredPOIs
           cityPOIs.forEach(p => {
             const existing = filteredPOIs.find(e => e.name === p.name && e.address === p.address);
-            if (existing) existing._priorityZone = true;
+            if (existing) {
+              existing._priorityZone = true;
+              if (!existing._priorityZoneIdxs) existing._priorityZoneIdxs = [];
+              if (!existing._priorityZoneIdxs.includes(zi)) existing._priorityZoneIdxs.push(zi);
+            }
           });
 
           filteredPOIs.push(...newPOIs);
-          console.log(`[Priorité] ${city} (${cLat.toFixed(4)},${cLng.toFixed(4)}) → ${newPOIs.length} POI(s) ajoutés, ${cityPOIs.length} marqués`);
+
+          // poisByZone[zi] = tous les POIs de cette zone (nouveaux + déjà présents marqués)
+          poisByZone[zi] = filteredPOIs.filter(p => p._priorityZoneIdxs?.includes(zi));
+
+          console.log(`[Priorité] Zone ${zi} "${city}" (${cLat.toFixed(4)},${cLng.toFixed(4)}) → ${poisByZone[zi].length} POI(s)`);
         } catch(e) {
           console.warn(`[Priorité] erreur pour ${city}:`, e);
         }
@@ -1236,59 +1253,57 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       }
     }
 
-    // --- ENFORCEMENT ZONES PRIORITAIRES : 30% minimum par journée ---
-    // Post-processing : garantir 10% des stops dans les zones prioritaires
-    if (priorityList.length > 0) {
-      const priorityPOIs = filteredPOIs.filter(p =>
-        inPriorityZone(p.name, p.address, p.lat, p.lng, p._priorityZone)
-      );
-
-      console.log(`[Priorité] ${priorityPOIs.length} POI(s) prioritaires disponibles`);
-
+    // --- ENFORCEMENT ZONES PRIORITAIRES : 1 stop par zone par jour ---
+    // Chaque zone doit apparaître au moins 1× par jour (cap à 40% du total journalier)
+    if (priorityList.length > 0 && poisByZone.length > 0) {
       for (const day of data.dailyPlans) {
         if (!day.stops || day.stops.length === 0) continue;
 
-        const total = day.stops.length;
-        const targetCount = Math.max(1, Math.ceil(total * 0.10)); // 10% minimum, au moins 1
-        const currentCount = day.stops.filter(s =>
-          inPriorityZone(s.locationName, s.address, s.lat, s.lng)
-        ).length;
-        const deficit = targetCount - currentCount;
-
-        if (deficit <= 0) continue; // Quota déjà atteint
-
-        // POIs prioritaires non encore utilisés ce jour
+        const maxReplace = Math.max(priorityList.length, Math.ceil(day.stops.length * 0.40));
+        let totalReplaced = 0;
         const usedNames = new Set(day.stops.map(s => s.locationName));
-        const candidates = priorityPOIs.filter(p => !usedNames.has(p.name));
 
-        if (candidates.length === 0) {
-          console.warn(`[Priorité] ${day.day} : aucun POI prioritaire disponible`);
-          continue;
-        }
+        for (let zi = 0; zi < priorityList.length; zi++) {
+          if (totalReplaced >= maxReplace) break;
 
-        // Remplacer des stops non-prioritaires (jamais les concurrents) par des POIs prioritaires
-        let replaced = 0;
-        for (let i = day.stops.length - 1; i >= 0 && replaced < deficit && replaced < candidates.length; i--) {
-          const stop = day.stops[i];
-          if (inPriorityZone(stop.locationName, stop.address, stop.lat, stop.lng)) continue;
-          if (stop.type === 'competitor') continue;
-          const poi = candidates[replaced];
-          const savedTime = stop.time;
-          Object.assign(stop, {
-            locationName: poi.name,
-            address: poi.address,
-            lat: poi.lat,
-            lng: poi.lng,
-            type: poi.type,
+          const zonePOIs = poisByZone[zi] || [];
+          if (zonePOIs.length === 0) continue;
+
+          // Zone déjà couverte ce jour ?
+          const alreadyCovered = day.stops.some(s =>
+            zonePOIs.some(p => p.name === s.locationName)
+          );
+          if (alreadyCovered) continue;
+
+          // Candidat disponible non déjà utilisé
+          const candidate = zonePOIs.find(p => !usedNames.has(p.name));
+          if (!candidate) continue;
+
+          // Trouver un stop remplaçable (non-prioritaire, non-concurrent, depuis la fin)
+          let replaceIdx = -1;
+          for (let i = day.stops.length - 1; i >= 0; i--) {
+            const s = day.stops[i];
+            if (s.type === 'competitor') continue;
+            if (inPriorityZone(s.locationName, s.address, s.lat, s.lng)) continue;
+            replaceIdx = i;
+            break;
+          }
+          if (replaceIdx === -1) continue;
+
+          const savedTime = day.stops[replaceIdx].time;
+          Object.assign(day.stops[replaceIdx], {
+            locationName: candidate.name,
+            address: candidate.address,
+            lat: candidate.lat,
+            lng: candidate.lng,
+            type: candidate.type,
             source: 'ZONE PRIORITAIRE',
-            marketDays: poi.marketDays || [],
+            marketDays: candidate.marketDays || [],
           });
-          stop.time = savedTime;
-          replaced++;
-        }
-
-        if (replaced > 0) {
-          console.log(`[Priorité] ${day.day} : ${replaced}/${total} arrêt(s) en zone prioritaire`);
+          day.stops[replaceIdx].time = savedTime;
+          usedNames.add(candidate.name);
+          totalReplaced++;
+          console.log(`[Priorité] ${day.day} zone "${priorityList[zi]}" → ${candidate.name}`);
         }
       }
     }
