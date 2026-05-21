@@ -1254,32 +1254,40 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     // --- ENFORCEMENT ZONES PRIORITAIRES : 1 stop par zone par jour ---
-    // Chaque zone doit apparaître au moins 1× par jour (cap à 40% du total journalier)
+    // Règle : chaque zone doit figurer au moins 1× par jour SI des POIs existent dans le rayon de campagne
     if (priorityList.length > 0 && poisByZone.length > 0) {
       for (const day of data.dailyPlans) {
         if (!day.stops || day.stops.length === 0) continue;
 
-        const maxReplace = Math.max(priorityList.length, Math.ceil(day.stops.length * 0.40));
-        let totalReplaced = 0;
         const usedNames = new Set(day.stops.map(s => s.locationName));
 
+        // Traiter TOUTES les zones sans break anticipé
         for (let zi = 0; zi < priorityList.length; zi++) {
-          if (totalReplaced >= maxReplace) break;
-
           const zonePOIs = poisByZone[zi] || [];
-          if (zonePOIs.length === 0) continue;
+          if (zonePOIs.length === 0) {
+            console.warn(`[Priorité] Zone "${priorityList[zi]}" : aucun POI OSM trouvé`);
+            continue;
+          }
 
-          // Zone déjà couverte ce jour ?
+          // Zone déjà couverte ce jour ? (vérif par nom exact)
           const alreadyCovered = day.stops.some(s =>
             zonePOIs.some(p => p.name === s.locationName)
           );
           if (alreadyCovered) continue;
 
-          // Candidat disponible non déjà utilisé
-          const candidate = zonePOIs.find(p => !usedNames.has(p.name));
-          if (!candidate) continue;
+          // Candidat : dans le rayon de campagne ET non déjà utilisé
+          const candidate = zonePOIs.find(p =>
+            !usedNames.has(p.name) &&
+            p.lat && p.lng &&
+            distKmPriority(originObj.lat, originObj.lng, p.lat, p.lng) <= radius
+          );
 
-          // Trouver un stop remplaçable (non-prioritaire, non-concurrent, depuis la fin)
+          if (!candidate) {
+            console.warn(`[Priorité] Zone "${priorityList[zi]}" : aucun POI dans le rayon ${radius}km`);
+            continue;
+          }
+
+          // Trouver un stop remplaçable : non-prioritaire, non-concurrent, depuis la fin
           let replaceIdx = -1;
           for (let i = day.stops.length - 1; i >= 0; i--) {
             const s = day.stops[i];
@@ -1302,8 +1310,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           });
           day.stops[replaceIdx].time = savedTime;
           usedNames.add(candidate.name);
-          totalReplaced++;
-          console.log(`[Priorité] ${day.day} zone "${priorityList[zi]}" → ${candidate.name}`);
+          console.log(`[Priorité] ${day.day} zone "${priorityList[zi]}" → ${candidate.name} (${distKmPriority(originObj.lat, originObj.lng, candidate.lat, candidate.lng).toFixed(1)}km)`);
         }
       }
     }
