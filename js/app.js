@@ -822,12 +822,12 @@ async function handleGenerate() {
 
     // Fetch POIs dédiés pour chaque zone prioritaire
     // poisByZone[i] = tableau de POIs appartenant à la zone i (pour enforcement par zone)
-    const poisByZone = [];
+    const poisByZone = priorityList.map(() => []);
     if (priorityList.length > 0) {
       setProgress('Recherche dans les zones prioritaires…', 48);
-      for (let zi = 0; zi < priorityList.length; zi++) {
-        const city = priorityList[zi];
-        poisByZone.push([]); // initialiser zone i
+
+      // Phase 1 : géocoder + fetcher toutes les zones EN PARALLÈLE
+      const zoneFetches = await Promise.all(priorityList.map(async (city, zi) => {
         try {
           // Geocoding sans restriction de type → accepte adresses, quartiers, villes
           const geoRes = await fetch(
@@ -836,43 +836,46 @@ async function handleGenerate() {
           const geoData = await geoRes.json();
           if (!geoData.features?.[0]) {
             console.warn(`[Priorité] geocoding échoué pour : ${city}`);
-            continue;
+            return null;
           }
           const [cLng, cLat] = geoData.features[0].geometry.coordinates;
-          priorityZoneCoords.push({ lat: cLat, lng: cLng, city });
-
-          // Overpass 3km autour des coordonnées → marquer les POIs avec _priorityZone + index
           const cityPOIs = await fetchRealPOIs(cLat, cLng, 3);
-          cityPOIs.forEach(p => {
-            p._priorityZone = true;
-            // Ajouter index de zone (un POI peut appartenir à plusieurs zones)
-            if (!p._priorityZoneIdxs) p._priorityZoneIdxs = [];
-            if (!p._priorityZoneIdxs.includes(zi)) p._priorityZoneIdxs.push(zi);
-          });
-
-          const newPOIs = cityPOIs.filter(p =>
-            !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
-            !isBlocked(p.name, p.address, p.lat, p.lng)
-          );
-          // Mettre à jour ceux déjà présents dans filteredPOIs
-          cityPOIs.forEach(p => {
-            const existing = filteredPOIs.find(e => e.name === p.name && e.address === p.address);
-            if (existing) {
-              existing._priorityZone = true;
-              if (!existing._priorityZoneIdxs) existing._priorityZoneIdxs = [];
-              if (!existing._priorityZoneIdxs.includes(zi)) existing._priorityZoneIdxs.push(zi);
-            }
-          });
-
-          filteredPOIs.push(...newPOIs);
-
-          // poisByZone[zi] = tous les POIs de cette zone (nouveaux + déjà présents marqués)
-          poisByZone[zi] = filteredPOIs.filter(p => p._priorityZoneIdxs?.includes(zi));
-
-          console.log(`[Priorité] Zone ${zi} "${city}" (${cLat.toFixed(4)},${cLng.toFixed(4)}) → ${poisByZone[zi].length} POI(s)`);
-        } catch(e) {
+          return { zi, city, cLat, cLng, cityPOIs };
+        } catch (e) {
           console.warn(`[Priorité] erreur pour ${city}:`, e);
+          return null;
         }
+      }));
+
+      // Phase 2 : fusionner séquentiellement dans filteredPOIs (état partagé)
+      for (const res of zoneFetches) {
+        if (!res) continue;
+        const { zi, city, cLat, cLng, cityPOIs } = res;
+        priorityZoneCoords.push({ lat: cLat, lng: cLng, city });
+
+        cityPOIs.forEach(p => {
+          p._priorityZone = true;
+          if (!p._priorityZoneIdxs) p._priorityZoneIdxs = [];
+          if (!p._priorityZoneIdxs.includes(zi)) p._priorityZoneIdxs.push(zi);
+        });
+
+        const newPOIs = cityPOIs.filter(p =>
+          !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
+          !isBlocked(p.name, p.address, p.lat, p.lng)
+        );
+        // Mettre à jour ceux déjà présents dans filteredPOIs
+        cityPOIs.forEach(p => {
+          const existing = filteredPOIs.find(e => e.name === p.name && e.address === p.address);
+          if (existing) {
+            existing._priorityZone = true;
+            if (!existing._priorityZoneIdxs) existing._priorityZoneIdxs = [];
+            if (!existing._priorityZoneIdxs.includes(zi)) existing._priorityZoneIdxs.push(zi);
+          }
+        });
+
+        filteredPOIs.push(...newPOIs);
+        poisByZone[zi] = filteredPOIs.filter(p => p._priorityZoneIdxs?.includes(zi));
+        console.log(`[Priorité] Zone ${zi} "${city}" (${cLat.toFixed(4)},${cLng.toFixed(4)}) → ${poisByZone[zi].length} POI(s)`);
       }
     }
 
@@ -983,6 +986,7 @@ RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
 ${exclusionInstruction}
 STRATÉGIE CARDINALE: Attribue à chaque jour une direction dominante (Nord, Sud, Est, Ouest).
 PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
+REPÈRES PREMIUM: Les opticiens et boulangeries occupent les meilleurs emplacements en cœur de ville — privilégie-les comme points d'ancrage centraux quand ils figurent dans la BASE OSM.
 JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une par jour, dans l'ordre chronologique. Même les jours sans créneau doivent avoir une entrée avec "stops":[] vide.
 HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
 RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
@@ -1115,6 +1119,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     const canUse = (name) => (poiUseCount.get(name) || 0) < MAX_POI_USES;
     const markUsed = (name) => poiUseCount.set(name, (poiUseCount.get(name) || 0) + 1);
 
+    // Arrêts nécessitant un reverse-geocoding → traités en parallèle après la boucle
+    const stopsNeedingAddr = [];
+
     for (const day of data.dailyPlans) {
       if (!day.stops) continue;
       const dayStr = (day.day || '').toLowerCase();
@@ -1240,16 +1247,27 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           stop.source = 'GÉOLOCALISATION';
         }
 
-        // Reverse geocode systématique si pas de vraie adresse postale
+        // Reverse geocode différé si pas de vraie adresse postale
         // Une vraie adresse contient un numéro de rue OU une virgule (nom, ville)
         const hasRealAddress = stop.address
           && stop.address !== stop.locationName
           && /\d/.test(stop.address)
           && stop.address.includes(',');
         if (!hasRealAddress && stop.lat && stop.lng) {
+          stopsNeedingAddr.push(stop);
+        }
+      }
+    }
+
+    // Reverse geocoding en parallèle (lots de 8 pour ménager l'API BAN)
+    if (stopsNeedingAddr.length > 0) {
+      setProgress(`Enrichissement adresses (${stopsNeedingAddr.length})...`, 88);
+      for (let i = 0; i < stopsNeedingAddr.length; i += 8) {
+        const batch = stopsNeedingAddr.slice(i, i + 8);
+        await Promise.all(batch.map(async stop => {
           const realAddr = await reverseGeocodeBAN(stop.lat, stop.lng);
           if (realAddr) stop.address = realAddr;
-        }
+        }));
       }
     }
 

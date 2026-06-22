@@ -659,13 +659,19 @@ function parsePOI(e, originLat, originLng) {
     ? (parseMarketDays(openingHours).length > 0 ? parseMarketDays(openingHours) : ['mercredi', 'samedi'])
     : [];
 
+  // Opticiens & boulangeries = emplacements premium cœur de ville → repères forts
+  const isPremiumCenter = tags.shop === 'optician' || tags.shop === 'bakery'
+    || tags.shop === 'pastry' || tags.amenity === 'bakery';
+  const reliability = isPremiumCenter ? 8 : (POI_RELIABILITY[type] || 1);
+
   return {
     name,
     lat: clat,
     lng: clng,
     type,
     address,
-    reliability: POI_RELIABILITY[type] || 1,
+    reliability,
+    _premiumCenter: isPremiumCenter,
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
     hours: openingHours,
     marketDays, // jours où le marché est ouvert (vide pour les non-marchés)
