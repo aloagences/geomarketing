@@ -467,22 +467,36 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
 
   async function tryOverpass(queryFn, radiusMeters) {
     const query = queryFn(lat, lng, radiusMeters);
-    for (const endpoint of OVERPASS_ENDPOINTS) {
+    const body = 'data=' + encodeURIComponent(query);
+
+    // Interroger les 3 endpoints EN PARALLÈLE : le plus rapide gagne.
+    // Timeout dur client de 12s via AbortController pour éviter tout blocage.
+    const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'data=' + encodeURIComponent(query),
+          body,
+          signal: ctrl.signal,
         });
-        if (!res.ok) continue;
+        if (!res.ok) throw new Error('bad status');
         const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); } catch { continue; }
-        if (!data.elements) continue;
+        const data = JSON.parse(text);
+        if (!data.elements) throw new Error('no elements');
         return dedupe(data.elements.map(e => parsePOI(e, lat, lng)).filter(Boolean));
-      } catch { /* try next */ }
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+
+    // Promise.any : première réponse valide. Rejette si tous échouent.
+    try {
+      return await Promise.any(attempts);
+    } catch {
+      return null; // null = échec total (pas juste 0 résultats)
     }
-    return null; // null = échec total (pas juste 0 résultats)
   }
 
   // Étape 1 : requête rapide essentielle à 4km
