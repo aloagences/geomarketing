@@ -1498,6 +1498,42 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // --- Garde-fou écoles (2e passage post-topographie) ---
     enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
 
+    // --- COUVERTURE HORAIRE GARANTIE ---
+    // Chaque créneau actif doit couvrir toute sa plage horaire.
+    // Si le filtrage a laissé trop peu de lieux, on double les lieux existants
+    // (au lieu de laisser un créneau avec un seul arrêt).
+    const MIN_STOPS_PER_SLOT = 3;
+    const toMinCov = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+    for (let idx = 0; idx < data.dailyPlans.length; idx++) {
+      const day = data.dailyPlans[idx];
+      if (!day.stops || day.stops.length === 0) continue;
+      const t = perDayTimes[idx];
+      if (!t) continue;
+
+      // Séparer matin / après-midi (frontière 14:00, cohérent avec le reste du code)
+      const split = 14 * 60;
+      let morning   = day.stops.filter(s => toMinCov(s.time) < split);
+      let afternoon = day.stops.filter(s => toMinCov(s.time) >= split);
+
+      // Double les lieux d'un créneau jusqu'à couvrir la plage (jamais les écoles)
+      const padSlot = (arr) => {
+        if (arr.length === 0 || arr.length >= MIN_STOPS_PER_SLOT) return arr;
+        const nonSchool = arr.filter(s => s.type !== 'school');
+        const pool = nonSchool.length ? nonSchool : arr;
+        let i = 0;
+        while (arr.length < MIN_STOPS_PER_SLOT) {
+          arr.push({ ...pool[i % pool.length], source: 'DOUBLON (couverture horaire)' });
+          i++;
+        }
+        return arr;
+      };
+
+      if (t.hasMorning)   { morning   = padSlot(morning);   redistributeStops(morning,   t.mornStart, t.mornEnd); }
+      if (t.hasAfternoon) { afternoon = padSlot(afternoon); redistributeStops(afternoon, t.aftStart, t.aftEnd); }
+
+      day.stops = [...morning, ...afternoon];
+    }
+
     // --- Rendu HTML sécurisé ---
     setProgress('Calcul itinéraire routier (OSRM)...', 85);
 
