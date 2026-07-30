@@ -499,36 +499,47 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
     }
   }
 
-  // Étape 1 : requête rapide essentielle à 4km
-  let results = await tryOverpass(buildEssentialQuery, r4km);
-  if (results && results.length >= 5) return results;
+  // Ne garder que les POIs réellement DANS le rayon (distance à vol d'oiseau)
+  const withinRadius = (pois) => (pois || []).filter(p => parseFloat(p.distance) <= radiusKm);
+
+  let pool = [];
+
+  // Étape 1 : requête rapide essentielle à 4km (toujours dans le rayon)
+  const r1 = await tryOverpass(buildEssentialQuery, r4km);
+  if (r1) pool = dedupe([...pool, ...r1]);
+  if (withinRadius(pool).length >= 8) return withinRadius(pool);
 
   // Étape 2 : requête rapide essentielle au rayon complet
   if (rFull > r4km) {
     const r2 = await tryOverpass(buildEssentialQuery, rFull);
-    if (r2 && r2.length >= 5) return r2;
-    if (r2 && r2.length > 0) results = r2;
+    if (r2) pool = dedupe([...pool, ...r2]);
+    if (withinRadius(pool).length >= 8) return withinRadius(pool);
   }
 
   // Étape 3 : requête complète (nodes + ways) au rayon complet
   const r3 = await tryOverpass(buildFullQuery, rFull);
-  if (r3 && r3.length >= 5) return r3;
-  if (r3 && r3.length > 0) results = (results || []).concat(r3);
+  if (r3) pool = dedupe([...pool, ...r3]);
 
-  // Étape 4 : requête complète élargie
+  // Assez de lieux DANS le rayon → on s'y tient strictement (rayon respecté)
+  const inRadius = withinRadius(pool);
+  if (inRadius.length >= 3) return inRadius;
+
+  // --- ÉLARGISSEMENT : uniquement si trop peu de lieux dans le rayon ---
+  // Étape 4 : requête complète élargie (jusqu'à radius×2, plafonné 40km)
   if (rWide > rFull) {
     const r4 = await tryOverpass(buildFullQuery, rWide);
-    if (r4 && r4.length >= 3) return dedupe([...(results || []), ...r4]);
-    if (r4 && r4.length > 0) results = dedupe([...(results || []), ...r4]);
+    if (r4) pool = dedupe([...pool, ...r4]);
   }
 
   // Étape 5 : fallback Nominatim — toujours des résultats même si Overpass est KO
-  if (!results || results.length < 3) {
+  if (pool.length < 3) {
     const nominatim = await fetchPOIsNominatim(lat, lng, radiusKm);
-    if (nominatim.length > 0) return dedupe([...(results || []), ...nominatim]);
+    if (nominatim.length > 0) pool = dedupe([...pool, ...nominatim]);
   }
 
-  return results || [];
+  // Préférer les lieux dans le rayon ; n'élargir que si le rayon est réellement vide
+  const inRadius2 = withinRadius(pool);
+  return inRadius2.length >= 3 ? inRadius2 : pool;
 }
 
 // Labels français pour les types OSM sans nom propre

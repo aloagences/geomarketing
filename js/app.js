@@ -1553,14 +1553,15 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
       const stopsHtmlArr = await Promise.all((day.stops || []).map(async (s) => {
         totalStops++;
-        const routeDist = await getRealRouteDistance(originObj.lat, originObj.lng, s.lat, s.lng);
+        // Distance à vol d'oiseau = référence du rayon (Overpass "around" est à vol d'oiseau)
+        const crowDist = calculateDistance(originObj.lat, originObj.lng, s.lat, s.lng);
 
         let distBadge;
-        if (routeDist > radius) {
-          if (routeDist > radius * 1.3) outOfBoundsCount++;
-          distBadge = `<span class="text-sm font-bold text-amber-500 ml-3 whitespace-nowrap">&#x1F699; ${routeDist.toFixed(1)}km</span>`;
+        if (crowDist > radius) {
+          if (crowDist > radius * 1.3) outOfBoundsCount++;
+          distBadge = `<span class="text-sm font-bold text-amber-500 ml-3 whitespace-nowrap">&#x1F699; ${crowDist.toFixed(1)}km</span>`;
         } else {
-          distBadge = `<span class="text-sm font-bold text-[#10b981] ml-3 whitespace-nowrap">&#x2713; ${routeDist.toFixed(1)}km</span>`;
+          distBadge = `<span class="text-sm font-bold text-[#10b981] ml-3 whitespace-nowrap">&#x2713; ${crowDist.toFixed(1)}km</span>`;
         }
 
         return renderStopHTML(s, distBadge);
