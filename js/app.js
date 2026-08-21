@@ -1002,7 +1002,7 @@ PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
 REPÈRES PREMIUM: Les opticiens et boulangeries occupent les meilleurs emplacements en cœur de ville — privilégie-les comme points d'ancrage centraux quand ils figurent dans la BASE OSM.
 JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une par jour, dans l'ordre chronologique. Même les jours sans créneau doivent avoir une entrée avec "stops":[] vide.
 HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
-RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-18:00 → arrêts vers 14:00, 15:15, 16:30, 17:15. Ne PAS concentrer tous les arrêts au début.
+RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-17:00 → arrêts vers 14:00, 15:00, 16:00, 16:45. Ne PAS concentrer tous les arrêts au début.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
 MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00. Ne jamais placer un marché un mardi, lundi, jeudi ou vendredi.
 CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient entre 12h00 et 14h00 les mercredis après-midi et samedis après-midi (pic d'affluence pause déjeuner et week-end).
@@ -1772,7 +1772,7 @@ function rebuildPerDaySchedule() {
   }
 
   const newDefaultMorn = inputRefs.morning?.value || '10:00 - 13:00';
-  const newDefaultAft = inputRefs.afternoon?.value || '14:00 - 18:00';
+  const newDefaultAft = inputRefs.afternoon?.value || '14:00 - 17:00';
 
   // Sauvegarder les valeurs existantes AVANT de reconstruire
   const saved = {};
@@ -1901,13 +1901,13 @@ function getSmDays() {
  */
 function getTimesForDay(dayIndex) {
   const defaultMorn = parseTimes(inputRefs.morning?.value || '10:00 - 13:00');
-  const defaultAft = parseTimes(inputRefs.afternoon?.value || '14:00 - 18:00');
+  const defaultAft = parseTimes(inputRefs.afternoon?.value || '14:00 - 17:00');
 
   // Garantir des valeurs par défaut solides
   const safeMornStart = defaultMorn.start || '10:00';
   const safeMornEnd = defaultMorn.end || '13:00';
   const safeAftStart = defaultAft.start || '14:00';
-  const safeAftEnd = defaultAft.end || '18:00';
+  const safeAftEnd = defaultAft.end || '17:00';
 
   const mornInput = document.getElementById(`perDay_morn_${dayIndex}`);
   const aftInput = document.getElementById(`perDay_aft_${dayIndex}`);
@@ -1918,7 +1918,7 @@ function getTimesForDay(dayIndex) {
   const hasAfternoon = aftInput ? aftInput.value.trim() !== '' : true;
 
   const morn = hasMorning ? parseTimes(mornInput ? mornInput.value.trim() : inputRefs.morning?.value || '10:00 - 13:00') : null;
-  const aft = hasAfternoon ? parseTimes(aftInput ? aftInput.value.trim() : inputRefs.afternoon?.value || '14:00 - 18:00') : null;
+  const aft = hasAfternoon ? parseTimes(aftInput ? aftInput.value.trim() : inputRefs.afternoon?.value || '14:00 - 17:00') : null;
 
   return {
     hasMorning,
