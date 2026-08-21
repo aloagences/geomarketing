@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.3 — 30 juillet 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.4 — 21 août 2026</span>
       </div>
     </header>
 
@@ -405,6 +405,44 @@
                                      class="input-style border-orange-300 text-sm px-2 py-1.5 flex-1 min-w-0" />
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+
+                <!-- Distribution centres équestres -->
+                <div class="col-span-1 md:col-span-2">
+                  <details id="equestrianDetails" class="group border-2 border-amber-500 rounded-xl overflow-hidden bg-amber-50/50">
+                    <summary class="p-3 cursor-pointer flex items-center justify-between select-none hover:bg-amber-100/50 transition-colors">
+                      <div class="flex items-center gap-2">
+                        <i data-lucide="rabbit" class="w-4 h-4 text-amber-700"></i>
+                        <span class="text-sm font-bold text-amber-900">Distribution centres équestres</span>
+                        <span class="text-[10px] bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide">Optionnel</span>
+                      </div>
+                      <div class="bg-amber-200 p-1.5 rounded-full text-amber-700 group-open:rotate-180 transition-transform duration-300 flex-shrink-0">
+                        <i data-lucide="chevron-down" class="w-4 h-4"></i>
+                      </div>
+                    </summary>
+                    <div class="px-4 pb-4 pt-3 border-t border-amber-200 bg-white/70 space-y-3">
+                      <p class="text-xs text-amber-700">Distribution de coupons dans 5 à 10 centres équestres de la zone. La même personne assure la mission : les centres sont intégrés au tracé du véhicule sur la journée dédiée, dans les horaires de la mission.</p>
+
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="flex items-center gap-2 bg-amber-50/70 border border-amber-200 rounded-lg p-2.5">
+                          <input type="checkbox" id="equestrianEnabled"
+                                 class="accent-amber-600 w-4 h-4 cursor-pointer" />
+                          <label for="equestrianEnabled" class="text-xs font-bold text-amber-800 cursor-pointer">
+                            Activer la distribution équestre
+                          </label>
+                        </div>
+                        <div>
+                          <label class="block text-xs font-bold text-amber-800 mb-1">
+                            <i data-lucide="calendar-days" class="w-3 h-3 inline mr-1"></i>Jour dédié
+                          </label>
+                          <select class="input-style border-amber-300 focus:border-amber-500 text-sm" id="equestrianDay">
+                            <option value="jeudi">Jeudi</option>
+                            <option value="mardi">Mardi</option>
+                          </select>
                         </div>
                       </div>
                     </div>

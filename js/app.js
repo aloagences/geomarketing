@@ -67,6 +67,8 @@ function initDomRefs() {
   inputRefs.smHasAfternoon = document.getElementById('smHasAfternoon');
   inputRefs.smAftStart = document.getElementById('smAftStart');
   inputRefs.smAftEnd = document.getElementById('smAftEnd');
+  inputRefs.equestrianEnabled = document.getElementById('equestrianEnabled');
+  inputRefs.equestrianDay = document.getElementById('equestrianDay');
 }
 
 // ========================================
@@ -231,6 +233,7 @@ const TYPE_ICONS = {
   culture:    { icon: 'palette',         color: 'text-pink-500' },
   park:       { icon: 'trees',           color: 'text-green-500' },
   medical:    { icon: 'heart-pulse',     color: 'text-rose-500' },
+  equestrian: { icon: 'rabbit',          color: 'text-amber-700' },
 };
 
 function getTypeIconHTML(type) {
@@ -956,6 +959,16 @@ async function handleGenerate() {
       } catch { /* continuer sans */ }
     }
 
+    // --- Centres équestres (distribution de coupons, mardi ou jeudi) ---
+    const equestrianActive = inputRefs.equestrianEnabled?.checked === true;
+    const equestrianDay = inputRefs.equestrianDay?.value || 'jeudi';
+    let equestrianCenters = [];
+    if (equestrianActive) {
+      setProgress('Recherche des centres équestres...', 50);
+      equestrianCenters = await fetchEquestrianCenters(originObj.lat, originObj.lng, radius);
+      console.log(`[Équestre] ${equestrianCenters.length} centres équestres trouvés`);
+    }
+
     // --- Horaires par jour (personnalisés ou par défaut) ---
     const perDayTimes = [];
     let perDayTimesPrompt = '';
@@ -1497,6 +1510,45 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     // --- Garde-fou écoles (2e passage post-topographie) ---
     enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
+
+    // --- CENTRES ÉQUESTRES : mission dédiée mardi ou jeudi ---
+    // La même personne fait la mission : les centres équestres remplacent le tracé
+    // du véhicule ce jour-là, répartis sur les horaires de la mission.
+    if (equestrianActive && equestrianCenters.length > 0) {
+      for (let idx = 0; idx < data.dailyPlans.length; idx++) {
+        const day = data.dailyPlans[idx];
+        const dayFr = FR_DAYS.find(d => (day.day || '').toLowerCase().includes(d)) || '';
+        if (dayFr !== equestrianDay) continue;
+        const t = perDayTimes[idx];
+        if (!t) continue;
+
+        const centers = equestrianCenters
+          .filter(c => !isBlocked(c.name, c.address, c.lat, c.lng))
+          .slice(0, 10)
+          .map(c => ({
+            time: '00:00', locationName: c.name, address: c.address,
+            type: 'equestrian', source: 'CENTRE ÉQUESTRE (coupons)',
+            lat: c.lat, lng: c.lng, marketDays: [],
+          }));
+        if (centers.length === 0) continue;
+
+        if (t.hasMorning && t.hasAfternoon) {
+          const half = Math.ceil(centers.length / 2);
+          const morning = centers.slice(0, half);
+          const afternoon = centers.slice(half);
+          redistributeStops(morning, t.mornStart, t.mornEnd);
+          redistributeStops(afternoon, t.aftStart, t.aftEnd);
+          day.stops = [...morning, ...afternoon];
+        } else if (t.hasMorning) {
+          redistributeStops(centers, t.mornStart, t.mornEnd);
+          day.stops = centers;
+        } else if (t.hasAfternoon) {
+          redistributeStops(centers, t.aftStart, t.aftEnd);
+          day.stops = centers;
+        }
+        console.log(`[Équestre] ${day.day} → ${centers.length} centres équestres injectés dans le tracé`);
+      }
+    }
 
     // --- COUVERTURE HORAIRE GARANTIE ---
     // Chaque créneau actif doit couvrir toute sa plage horaire.

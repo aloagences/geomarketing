@@ -542,6 +542,85 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
   return inRadius2.length >= 3 ? inRadius2 : pool;
 }
 
+// ========================================
+// CENTRES ÉQUESTRES (distribution de coupons)
+// ========================================
+
+/**
+ * Récupère les centres équestres de la zone (OSM leisure=horse_riding / sport=equestrian).
+ * Retourne 5 à 10 centres triés par distance croissante. Élargit le rayon si <5 trouvés.
+ */
+async function fetchEquestrianCenters(lat, lng, radiusKm) {
+  const runQuery = async (radiusMeters) => {
+    const rM = Math.min(radiusMeters, 40000);
+    const query = `[out:json][timeout:25];(` +
+      `node["leisure"="horse_riding"](around:${rM},${lat},${lng});` +
+      `way["leisure"="horse_riding"](around:${rM},${lat},${lng});` +
+      `node["sport"="equestrian"](around:${rM},${lat},${lng});` +
+      `way["sport"="equestrian"](around:${rM},${lat},${lng});` +
+      `node["club"="equestrian"](around:${rM},${lat},${lng});` +
+      `way["club"="equestrian"](around:${rM},${lat},${lng});` +
+      `);out center 60;`;
+    const body = 'data=' + encodeURIComponent(query);
+    const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body, signal: ctrl.signal,
+        });
+        if (!res.ok) throw new Error('bad status');
+        const data = JSON.parse(await res.text());
+        if (!data.elements) throw new Error('no elements');
+        return data.elements;
+      } finally { clearTimeout(timer); }
+    });
+    try { return await Promise.any(attempts); } catch { return []; }
+  };
+
+  const toCenter = (e) => {
+    const tags = e.tags || {};
+    const clat = e.lat || e.center?.lat;
+    const clng = e.lon || e.center?.lon;
+    if (!clat || !clng) return null;
+    const city = tags['addr:city'] || tags['addr:town'] || '';
+    const name = tags.name || tags.brand || `Centre équestre${city ? ` (${city})` : ''}`;
+    let address;
+    if (tags['addr:street']) {
+      address = `${tags['addr:housenumber'] || ''} ${tags['addr:street']}`.trim();
+      if (city) address += `, ${city}`;
+    } else {
+      address = city ? `${name}, ${city}` : name;
+    }
+    return {
+      name, lat: clat, lng: clng, type: 'equestrian', address,
+      source: 'OSM', reliability: 7, marketDays: [],
+      hours: tags.opening_hours || 'Non spécifié',
+      distance: calculateDistance(lat, lng, clat, clng).toFixed(1),
+    };
+  };
+
+  const dedupeSort = (arr) => {
+    const seen = new Set();
+    return arr.filter(Boolean).filter(c => {
+      const k = `${c.name}|${c.address}`;
+      if (seen.has(k)) return false; seen.add(k); return true;
+    }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+  };
+
+  // 1) Recherche dans le rayon de campagne
+  let centers = dedupeSort((await runQuery(radiusKm * 1000)).map(toCenter));
+  // 2) Élargir (x3, plafonné 40km) si moins de 5 centres — objectif : 5 à 10
+  if (centers.length < 5) {
+    const wide = dedupeSort((await runQuery(radiusKm * 3000)).map(toCenter));
+    if (wide.length > centers.length) centers = wide;
+  }
+
+  return centers.slice(0, 10);
+}
+
 // Labels français pour les types OSM sans nom propre
 const OSM_TYPE_LABELS = {
   // shop=*
