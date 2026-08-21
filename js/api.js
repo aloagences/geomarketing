@@ -621,6 +621,58 @@ async function fetchEquestrianCenters(lat, lng, radiusKm) {
   return centers.slice(0, 10);
 }
 
+// Rues commerçantes / piétonnes pour le street marketing : récupère la
+// géométrie afin de décrire des secteurs « de telle rue à telle rue ».
+async function fetchCommercialStreets(lat, lng, radiusKm) {
+  const rM = Math.min(radiusKm * 1000, 5000);
+  const query = `[out:json][timeout:25];(` +
+    `way["highway"="pedestrian"]["name"](around:${rM},${lat},${lng});` +
+    `way["highway"="living_street"]["name"](around:${rM},${lat},${lng});` +
+    `way["highway"="residential"]["name"]["shop"](around:${rM},${lat},${lng});` +
+    `);out geom;`;
+  const body = 'data=' + encodeURIComponent(query);
+  const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body, signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('bad status');
+      const data = JSON.parse(await res.text());
+      if (!data.elements) throw new Error('no elements');
+      return data.elements;
+    } finally { clearTimeout(timer); }
+  });
+  let elements = [];
+  try { elements = await Promise.any(attempts); } catch { return []; }
+
+  const streets = elements.map((e) => {
+    const g = e.geometry;
+    if (!Array.isArray(g) || g.length < 2) return null;
+    const tags = e.tags || {};
+    const name = tags.name;
+    if (!name) return null;
+    const start = g[0];
+    const end = g[g.length - 1];
+    const mid = g[Math.floor(g.length / 2)];
+    return {
+      name,
+      lat: mid.lat, lng: mid.lon,
+      startLat: start.lat, startLng: start.lon,
+      endLat: end.lat, endLng: end.lon,
+      distance: calculateDistance(lat, lng, mid.lat, mid.lon).toFixed(1),
+    };
+  }).filter(Boolean);
+
+  const seen = new Set();
+  return streets.filter((s) => {
+    if (seen.has(s.name)) return false; seen.add(s.name); return true;
+  }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+}
+
 // Labels français pour les types OSM sans nom propre
 const OSM_TYPE_LABELS = {
   // shop=*

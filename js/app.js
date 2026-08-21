@@ -966,6 +966,14 @@ async function handleGenerate() {
     if (equestrianActive) {
       setProgress('Recherche des centres équestres...', 50);
       equestrianCenters = await fetchEquestrianCenters(originObj.lat, originObj.lng, radius);
+      // Enrichir les adresses de livraison manquantes via reverse-géocodage BAN
+      for (const c of equestrianCenters) {
+        const hasRealAddress = /\d/.test(c.address) && c.address.includes(',');
+        if (!hasRealAddress) {
+          const a = await reverseGeocodeBAN(c.lat, c.lng);
+          if (a) c.address = a;
+        }
+      }
       console.log(`[Équestre] ${equestrianCenters.length} centres équestres trouvés`);
     }
 
@@ -1363,6 +1371,37 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         ['transport', 'market', 'shopping', 'culture', 'park'].includes(p.type)
       );
 
+      // Rues commerçantes / piétonnes → secteurs « de telle rue à telle rue »
+      const shortStreet = (addr) => (addr || '').split(',')[0].replace(/^\d+\s*/, '').trim();
+      let smStreetBeats = [];
+      try {
+        setProgress('Analyse des rues commerçantes (street marketing)...', 55);
+        const smStreets = (await fetchCommercialStreets(smCityCoords.lat, smCityCoords.lng, SM_RADIUS_KM))
+          .filter(st => distKm(smCityCoords.lat, smCityCoords.lng, st.lat, st.lng) <= SM_RADIUS_KM)
+          .slice(0, 8);
+        for (const st of smStreets) {
+          // Reverse-géocode des extrémités pour décrire « de X à Y »
+          const [fromA, toA] = await Promise.all([
+            reverseGeocodeBAN(st.startLat, st.startLng),
+            reverseGeocodeBAN(st.endLat, st.endLng),
+          ]);
+          const fromLabel = shortStreet(fromA) || st.name;
+          const toLabel = shortStreet(toA) || st.name;
+          const beat = (fromLabel && toLabel && fromLabel !== toLabel)
+            ? `Secteur piéton : de ${fromLabel} à ${toLabel}`
+            : `Secteur piéton : ${st.name}`;
+          smStreetBeats.push({
+            locationName: st.name,
+            address: beat,
+            type: 'pedestrian',
+            source: 'RUE COMMERÇANTE (street marketing)',
+            lat: st.lat, lng: st.lng,
+            marketDays: [],
+          });
+        }
+        console.log(`[SM] ${smStreetBeats.length} secteurs de rue construits`);
+      } catch (e) { console.warn('[SM] rues commerçantes indisponibles', e); }
+
       for (let idx = 0; idx < data.dailyPlans.length; idx++) {
         const iso = datesISO[idx];
         if (!smDays.includes(iso)) continue;
@@ -1385,15 +1424,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         }
 
         // 2. Construire/enrichir smStops (arrêts piétons)
-        const rawSmStops = day.smStops || [];
-        const smUsed = new Set(rawSmStops.map(s => s.locationName));
-        const smFill = smPOIs.filter(p => !smUsed.has(p.name));
-
-        // Garder les smStops IA valides (dans le rayon), compléter si besoin
-        const validSmStops = rawSmStops.filter(s =>
-          !s.lat || !s.lng || distKm(smCityCoords.lat, smCityCoords.lng, s.lat, s.lng) <= SM_RADIUS_KM
-        );
-        while (validSmStops.length < 5 && smFill.length > 0) {
+        //    Priorité aux secteurs de rue précis « de telle rue à telle rue »
+        const validSmStops = smStreetBeats.map(b => ({ ...b }));
+        const beatNames = new Set(smStreetBeats.map(b => b.locationName));
+        const smFill = smPOIs.filter(p => !beatNames.has(p.name));
+        while (validSmStops.length < 6 && smFill.length > 0) {
           const poi = smFill.shift();
           validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
         }
@@ -1665,6 +1700,35 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         <i data-lucide="footprints" class="w-4 h-4"></i> SM Couplé
       </span>` : '';
 
+      // Listing livraison — Centres équestres (jour dédié)
+      let equestrianSectionHtml = '';
+      const eqSeen = new Set();
+      const eqStops = (day.stops || []).filter(s => s.type === 'equestrian').filter(s => {
+        const k = `${s.locationName}|${s.address}`;
+        if (eqSeen.has(k)) return false; eqSeen.add(k); return true;
+      });
+      if (eqStops.length > 0) {
+        const eqRows = eqStops.map((s, i) => `
+          <div class="flex items-start gap-3 p-3 bg-white rounded-xl border border-amber-200 mb-2">
+            <span class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-amber-100 text-amber-800 font-extrabold text-sm">${i + 1}</span>
+            <div class="min-w-0">
+              <div class="font-extrabold text-amber-900 text-base">${sanitize(s.locationName)}</div>
+              <div class="text-sm text-amber-700 flex items-center gap-1 mt-0.5">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5 flex-shrink-0"></i>
+                <span>${sanitize(s.address || 'Adresse à confirmer')}</span>
+              </div>
+            </div>
+          </div>`).join('');
+        equestrianSectionHtml = `
+          <div class="mt-6 border-t-2 border-amber-300 pt-5">
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+              <i data-lucide="rabbit" class="w-5 h-5 text-amber-700"></i>
+              <span class="text-sm font-extrabold uppercase tracking-widest text-amber-700">Listing livraison — Centres équestres (${eqStops.length})</span>
+            </div>
+            <div class="bg-amber-50 p-4 rounded-3xl border border-amber-200">${eqRows}</div>
+          </div>`;
+      }
+
       plansHtml += `
         <div id="day-card-${idx}" class="mb-10 page-break-inside-avoid px-2">
           <div class="flex flex-col md:flex-row md:justify-between md:items-end mb-4 pb-3 border-b ${isSmDay ? 'border-cyan-200' : 'border-gray-200'} gap-4">
@@ -1687,6 +1751,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           ${weatherAlert}
           <div class="bg-[#F8FAFC] p-4 rounded-3xl">${stopsHtmlArr.join('')}</div>
           ${smSectionHtml}
+          ${equestrianSectionHtml}
         </div>`;
     }
 
