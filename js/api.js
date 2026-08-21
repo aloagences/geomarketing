@@ -610,13 +610,9 @@ async function fetchEquestrianCenters(lat, lng, radiusKm) {
     }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
   };
 
-  // 1) Recherche dans le rayon de campagne
-  let centers = dedupeSort((await runQuery(radiusKm * 1000)).map(toCenter));
-  // 2) Élargir (x3, plafonné 40km) si moins de 5 centres — objectif : 5 à 10
-  if (centers.length < 5) {
-    const wide = dedupeSort((await runQuery(radiusKm * 3000)).map(toCenter));
-    if (wide.length > centers.length) centers = wide;
-  }
+  // Recherche STRICTEMENT dans le rayon de campagne (pas d'élargissement)
+  const centers = dedupeSort((await runQuery(radiusKm * 1000)).map(toCenter))
+    .filter(c => parseFloat(c.distance) <= radiusKm);
 
   return centers.slice(0, 10);
 }

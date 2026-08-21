@@ -1563,7 +1563,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           .map(c => ({
             time: '00:00', locationName: c.name, address: c.address,
             type: 'equestrian', source: 'CENTRE ÉQUESTRE (coupons)',
-            lat: c.lat, lng: c.lng, marketDays: [],
+            lat: c.lat, lng: c.lng, marketDays: [], hours: c.hours || 'Non spécifié',
           }));
         if (centers.length === 0) continue;
 
@@ -1708,7 +1708,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         if (eqSeen.has(k)) return false; eqSeen.add(k); return true;
       });
       if (eqStops.length > 0) {
-        const eqRows = eqStops.map((s, i) => `
+        const eqRows = eqStops.map((s, i) => {
+          const hasHours = s.hours && s.hours !== 'Non spécifié';
+          return `
           <div class="flex items-start gap-3 p-3 bg-white rounded-xl border border-amber-200 mb-2">
             <span class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-amber-100 text-amber-800 font-extrabold text-sm">${i + 1}</span>
             <div class="min-w-0">
@@ -1717,8 +1719,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
                 <i data-lucide="map-pin" class="w-3.5 h-3.5 flex-shrink-0"></i>
                 <span>${sanitize(s.address || 'Adresse à confirmer')}</span>
               </div>
+              <div class="text-xs mt-1 flex items-center gap-1 ${hasHours ? 'text-amber-600' : 'text-amber-400 italic'}">
+                <i data-lucide="clock" class="w-3.5 h-3.5 flex-shrink-0"></i>
+                <span>${hasHours ? sanitize(s.hours) : 'Horaires non communiqués'}</span>
+              </div>
             </div>
-          </div>`).join('');
+          </div>`;
+        }).join('');
         equestrianSectionHtml = `
           <div class="mt-6 border-t-2 border-amber-300 pt-5">
             <div class="flex flex-wrap items-center gap-2 mb-3">
