@@ -547,20 +547,22 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
 // ========================================
 
 /**
- * Récupère les centres équestres de la zone (OSM leisure=horse_riding / sport=equestrian).
- * Retourne 5 à 10 centres triés par distance croissante. Élargit le rayon si <5 trouvés.
+ * Récupère les centres équestres de la zone : tags OSM (leisure=horse_riding,
+ * sport=equestrian/horse, club=equestrian, animal_boarding) + recherche par nom
+ * (équestre, poney-club, haras, manège, écurie). Strictement dans le rayon.
  */
 async function fetchEquestrianCenters(lat, lng, radiusKm) {
   const runQuery = async (radiusMeters) => {
     const rM = Math.min(radiusMeters, 40000);
+    // Regex nom : centre équestre, poney-club, haras, manège, écurie...
+    const nameRx = '[ée]questre|poney|poney.?club|haras|man[eè]ge|[ée]curie';
     const query = `[out:json][timeout:25];(` +
-      `node["leisure"="horse_riding"](around:${rM},${lat},${lng});` +
-      `way["leisure"="horse_riding"](around:${rM},${lat},${lng});` +
-      `node["sport"="equestrian"](around:${rM},${lat},${lng});` +
-      `way["sport"="equestrian"](around:${rM},${lat},${lng});` +
-      `node["club"="equestrian"](around:${rM},${lat},${lng});` +
-      `way["club"="equestrian"](around:${rM},${lat},${lng});` +
-      `);out center 60;`;
+      `nwr["leisure"="horse_riding"](around:${rM},${lat},${lng});` +
+      `nwr["sport"~"equestrian|horse"](around:${rM},${lat},${lng});` +
+      `nwr["club"="equestrian"](around:${rM},${lat},${lng});` +
+      `nwr["amenity"="animal_boarding"]["animal_boarding"~"horse",i](around:${rM},${lat},${lng});` +
+      `nwr["name"~"${nameRx}",i](around:${rM},${lat},${lng});` +
+      `);out center 80;`;
     const body = 'data=' + encodeURIComponent(query);
     const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
       const ctrl = new AbortController();
@@ -585,6 +587,12 @@ async function fetchEquestrianCenters(lat, lng, radiusKm) {
     const clat = e.lat || e.center?.lat;
     const clng = e.lon || e.center?.lon;
     if (!clat || !clng) return null;
+    // Exclut les faux positifs du filtre par nom (rues, cours d'eau, voies ferrées)
+    const isEquestrianTag = tags.leisure === 'horse_riding'
+      || /equestrian|horse/.test(tags.sport || '')
+      || tags.club === 'equestrian'
+      || tags.amenity === 'animal_boarding';
+    if (!isEquestrianTag && (tags.highway || tags.waterway || tags.railway)) return null;
     const city = tags['addr:city'] || tags['addr:town'] || '';
     const name = tags.name || tags.brand || `Centre équestre${city ? ` (${city})` : ''}`;
     let address;

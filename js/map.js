@@ -13,8 +13,10 @@ function drawMap(data, origin, radiusKm) {
 
     L.control.zoom({ position: 'topleft' }).addTo(mapInstance);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+      subdomains: 'abc',
     }).addTo(mapInstance);
 
     markersLayer = L.layerGroup().addTo(mapInstance);
