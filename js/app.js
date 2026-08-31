@@ -1000,7 +1000,7 @@ async function handleGenerate() {
           try { geo = await geocodeAddressBAN(address || name); } catch { geo = null; }
           const manual = {
             name, type: 'equestrian', source: 'CENTRE ÉQUESTRE (saisi)',
-            address: address || 'Adresse à confirmer',
+            address: address || 'Dépôt de coupons',
             hours: 'Non spécifié', reliability: 7, marketDays: [],
             manual: true,
             lat: geo?.lat ?? originObj.lat,
@@ -1767,7 +1767,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               <div class="font-extrabold text-amber-900 text-base">${sanitize(s.locationName)}${outBadge}</div>
               <div class="text-sm text-amber-700 flex items-center gap-1 mt-0.5">
                 <i data-lucide="map-pin" class="w-3.5 h-3.5 flex-shrink-0"></i>
-                <span>${sanitize(s.address || 'Adresse à confirmer')}</span>
+                <span>${sanitize(s.address || 'Dépôt de coupons')}</span>
               </div>
               <div class="text-xs mt-1 flex items-center gap-1 ${hasHours ? 'text-amber-600' : 'text-amber-400 italic'}">
                 <i data-lucide="clock" class="w-3.5 h-3.5 flex-shrink-0"></i>
