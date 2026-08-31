@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.8 — 21 août 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v2.9 — 21 août 2026</span>
       </div>
     </header>
 
@@ -63,7 +63,7 @@
                 <div>
                   <h3 class="font-bold text-blue-900 text-lg flex items-center gap-2 flex-wrap">
                     Moteur d'Intelligence Artificielle
-                    <span id="activeAiBadge" class="bg-blue-600 text-white text-[10px] px-2 py-1 rounded-full uppercase tracking-wider font-bold shadow-sm">OpenRouter</span>
+                    <span id="activeAiBadge" class="bg-blue-600 text-white text-[10px] px-2 py-1 rounded-full uppercase tracking-wider font-bold shadow-sm">Mistral AI</span>
                   </h3>
                   <p class="text-sm text-blue-700 mt-1 group-open:hidden">Cliquez pour modifier le moteur ou renseigner une clé API.</p>
                   <p class="text-sm text-blue-700 mt-1 hidden group-open:block">Sélectionnez l'IA de votre choix. Les clés sont sauvegardées localement.</p>
@@ -81,8 +81,8 @@
                 <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm relative overflow-hidden">
                   <div class="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-bl-lg">100% GRATUIT</div>
                   <label class="block text-xs font-bold text-emerald-700 uppercase mb-2 flex items-center cursor-pointer hover:text-emerald-800">
-                    <input type="radio" name="aiEngine" value="openrouter" checked class="mr-2 w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer" />
-                    OpenRouter (Recommandé)
+                    <input type="radio" name="aiEngine" value="openrouter" class="mr-2 w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer" />
+                    OpenRouter
                   </label>
                   <div class="flex gap-2">
                     <input type="password" id="openrouterKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="sk-or-v1-..." />
@@ -103,8 +103,8 @@
                   <div class="flex flex-col sm:flex-row gap-2">
                     <input type="password" id="apiKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="AIzaSy..." />
                     <select id="modelSelect" class="input-style text-sm border-gray-200 w-full sm:w-auto bg-white py-2 px-3">
-                      <option value="gemini-2.5-pro" selected>Gemini 2.5 Pro</option>
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                      <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (recommandé)</option>
+                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (tier payant)</option>
                       <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                     </select>
                     <button id="validateKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
@@ -148,8 +148,8 @@
                 <!-- Mistral -->
                 <div class="bg-white p-3 rounded-lg border border-blue-100 shadow-sm md:col-span-2">
                   <label class="block text-xs font-bold text-blue-800 uppercase mb-2 flex items-center cursor-pointer hover:text-blue-900">
-                    <input type="radio" name="aiEngine" value="mistral" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-                    Mistral AI (Europe)
+                    <input type="radio" name="aiEngine" value="mistral" checked class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                    Mistral AI (Europe) — Recommandé
                   </label>
                   <div class="flex gap-2">
                     <input type="password" id="mistralKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="Renseignez votre clé Mistral..." />

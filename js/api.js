@@ -29,14 +29,19 @@ async function fetchWithRetry(fetchFn, delays = [1000, 2000, 4000]) {
 
 // --- Google Gemini ---
 async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     systemInstruction: { parts: [{ text: systemInstruction }] },
     generationConfig: { responseMimeType: "application/json" },
   };
 
-  return fetchWithRetry(async () => {
+  // Modèle demandé + repli automatique vers des modèles accessibles au tier
+  // gratuit si le modèle choisi n'est pas disponible pour la clé.
+  const fallbacks = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+  const chain = [model, ...fallbacks.filter(m => m !== model)];
+
+  const callModel = (m) => fetchWithRetry(async () => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -44,13 +49,30 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `Erreur Gemini (${res.status})`);
+      const msg = err.error?.message || `Erreur Gemini (${res.status})`;
+      const tierError = res.status === 403 || res.status === 404
+        || /subscription tier|not available|not found|not supported/i.test(msg);
+      const e = new Error(msg);
+      e.tierError = tierError;
+      throw e;
     }
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error("Réponse Gemini vide.");
     return text;
   });
+
+  let lastErr;
+  for (const m of chain) {
+    try {
+      return await callModel(m);
+    } catch (e) {
+      lastErr = e;
+      if (!e.tierError) throw e; // erreur réelle (réseau, quota) → on remonte
+      console.warn(`[Gemini] ${m} indisponible pour cette clé, repli en cours…`);
+    }
+  }
+  throw lastErr;
 }
 
 // --- Groq ---

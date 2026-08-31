@@ -84,7 +84,7 @@ const ENGINE_CONFIG = {
 };
 
 function getActiveEngine() {
-  return document.querySelector('input[name="aiEngine"]:checked')?.value || 'openrouter';
+  return document.querySelector('input[name="aiEngine"]:checked')?.value || 'mistral';
 }
 
 function getKeys() {
@@ -116,7 +116,7 @@ function loadSavedKeys() {
   const modelSelect = document.getElementById('modelSelect');
   if (savedModel && modelSelect) modelSelect.value = savedModel;
 
-  const savedEngine = safeGetItem(StorageKeys.ENGINE) || 'openrouter';
+  const savedEngine = safeGetItem(StorageKeys.ENGINE) || 'mistral';
   const radio = document.querySelector(`input[name="aiEngine"][value="${savedEngine}"]`);
   if (radio) radio.checked = true;
 
