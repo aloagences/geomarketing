@@ -1587,8 +1587,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
 
     // --- CENTRES ÉQUESTRES : mission dédiée mardi ou jeudi ---
-    // La même personne fait la mission : les centres équestres remplacent le tracé
-    // du véhicule ce jour-là, répartis sur les horaires de la mission.
+    // La même personne assure la mission. La livraison de coupons est rapide,
+    // donc on CONSERVE les arrêts POI importants du jour et on AJOUTE les centres
+    // (une seule livraison par centre, jamais de retour dans la journée).
     if (equestrianActive && equestrianCenters.length > 0) {
       for (let idx = 0; idx < data.dailyPlans.length; idx++) {
         const day = data.dailyPlans[idx];
@@ -1608,21 +1609,24 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           }));
         if (centers.length === 0) continue;
 
+        // Conserve les arrêts importants existants (hors anciens centres équestres)
+        const existing = (day.stops || []).filter(s => s.type !== 'equestrian');
+
         if (t.hasMorning && t.hasAfternoon) {
           const half = Math.ceil(centers.length / 2);
           const morning = centers.slice(0, half);
           const afternoon = centers.slice(half);
           redistributeStops(morning, t.mornStart, t.mornEnd);
           redistributeStops(afternoon, t.aftStart, t.aftEnd);
-          day.stops = [...morning, ...afternoon];
+          day.stops = [...existing, ...morning, ...afternoon];
         } else if (t.hasMorning) {
           redistributeStops(centers, t.mornStart, t.mornEnd);
-          day.stops = centers;
+          day.stops = [...existing, ...centers];
         } else if (t.hasAfternoon) {
           redistributeStops(centers, t.aftStart, t.aftEnd);
-          day.stops = centers;
+          day.stops = [...existing, ...centers];
         }
-        console.log(`[Équestre] ${day.day} → ${centers.length} centres équestres injectés dans le tracé`);
+        console.log(`[Équestre] ${day.day} → ${centers.length} centres équestres ajoutés au tracé (${existing.length} arrêts importants conservés)`);
       }
     }
 
@@ -1643,11 +1647,12 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       let morning   = day.stops.filter(s => toMinCov(s.time) < split);
       let afternoon = day.stops.filter(s => toMinCov(s.time) >= split);
 
-      // Double les lieux d'un créneau jusqu'à couvrir la plage (jamais les écoles)
+      // Double les lieux d'un créneau jusqu'à couvrir la plage.
+      // Jamais les écoles ni les centres équestres (livrés une seule fois).
       const padSlot = (arr) => {
         if (arr.length === 0 || arr.length >= MIN_STOPS_PER_SLOT) return arr;
-        const nonSchool = arr.filter(s => s.type !== 'school');
-        const pool = nonSchool.length ? nonSchool : arr;
+        const pool = arr.filter(s => s.type !== 'school' && s.type !== 'equestrian');
+        if (pool.length === 0) return arr; // rien à dupliquer sans risque
         let i = 0;
         while (arr.length < MIN_STOPS_PER_SLOT) {
           arr.push({ ...pool[i % pool.length], source: 'DOUBLON (couverture horaire)' });
