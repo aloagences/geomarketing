@@ -100,15 +100,27 @@ async function callOpenAIAPI(apiKey, prompt, systemInstruction) {
 }
 
 // --- Mistral ---
+// mistral-large n'est pas inclus dans le tier gratuit (« This model is not
+// available in your subscription tier »). On privilégie les modèles
+// accessibles au tier gratuit, avec repli automatique.
+const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-nemo', 'mistral-large-latest'];
+
 async function callMistralAPI(apiKey, prompt, systemInstruction) {
-  return callOpenAICompatible(
-    "https://api.mistral.ai/v1/chat/completions",
-    apiKey,
-    "mistral-large-latest",
-    prompt,
-    systemInstruction,
-    "Mistral"
-  );
+  let lastErr;
+  for (const model of MISTRAL_MODELS) {
+    try {
+      return await callOpenAICompatible(
+        "https://api.mistral.ai/v1/chat/completions",
+        apiKey, model, prompt, systemInstruction, "Mistral"
+      );
+    } catch (e) {
+      lastErr = e;
+      const tierError = /subscription tier|not available|not found|access|401|403|404/i.test(e.message || '');
+      if (!tierError) throw e; // erreur réelle (réseau, quota) → on remonte
+      console.warn(`[Mistral] ${model} indisponible pour cette clé, repli en cours…`);
+    }
+  }
+  throw lastErr;
 }
 
 /**
