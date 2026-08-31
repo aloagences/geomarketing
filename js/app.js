@@ -69,6 +69,7 @@ function initDomRefs() {
   inputRefs.smAftEnd = document.getElementById('smAftEnd');
   inputRefs.equestrianEnabled = document.getElementById('equestrianEnabled');
   inputRefs.equestrianDay = document.getElementById('equestrianDay');
+  inputRefs.equestrianManual = document.getElementById('equestrianManual');
 }
 
 // ========================================
@@ -983,7 +984,37 @@ async function handleGenerate() {
           if (a) c.address = a;
         }
       }
-      console.log(`[Équestre] ${equestrianCenters.length} centres équestres trouvés`);
+      console.log(`[Équestre] ${equestrianCenters.length} centres équestres trouvés (OSM)`);
+
+      // Ajout manuel : « Nom ; Adresse » (une ligne par centre)
+      const manualRaw = (inputRefs.equestrianManual?.value || '').trim();
+      if (manualRaw) {
+        const lines = manualRaw.split('\n').map(l => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          const [namePart, ...addrParts] = line.split(';');
+          const name = (namePart || '').trim();
+          const address = addrParts.join(';').trim();
+          if (!name) continue;
+          // Géocodage de l'adresse (ou du nom) pour placer le point sur le tracé
+          let geo = null;
+          try { geo = await geocodeAddressBAN(address || name); } catch { geo = null; }
+          const manual = {
+            name, type: 'equestrian', source: 'CENTRE ÉQUESTRE (saisi)',
+            address: address || 'Adresse à confirmer',
+            hours: 'Non spécifié', reliability: 7, marketDays: [],
+            manual: true,
+            lat: geo?.lat ?? originObj.lat,
+            lng: geo?.lng ?? originObj.lng,
+            distance: geo ? calculateDistance(originObj.lat, originObj.lng, geo.lat, geo.lng).toFixed(1) : '0.0',
+          };
+          // Évite les doublons avec les centres OSM (même nom).
+          // Placé en tête pour être prioritaire (jamais coupé par slice(0,10)).
+          const dupIdx = equestrianCenters.findIndex(c => c.name.toLowerCase() === name.toLowerCase());
+          if (dupIdx >= 0) equestrianCenters.splice(dupIdx, 1);
+          equestrianCenters.unshift(manual);
+        }
+        console.log(`[Équestre] ${lines.length} centre(s) saisi(s) manuellement ajouté(s)`);
+      }
     }
 
     // --- Horaires par jour (personnalisés ou par défaut) ---
