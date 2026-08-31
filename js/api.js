@@ -656,9 +656,25 @@ async function fetchEquestrianCenters(lat, lng, radiusKm) {
     }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
   };
 
-  // Recherche STRICTEMENT dans le rayon de campagne (pas d'élargissement)
-  const centers = dedupeSort((await runQuery(radiusKm * 1000)).map(toCenter))
+  // 1) Recherche dans le rayon de campagne
+  let centers = dedupeSort((await runQuery(radiusKm * 1000)).map(toCenter))
     .filter(c => parseFloat(c.distance) <= radiusKm);
+
+  // 2) Repli : si AUCUN centre dans le rayon, on élargit progressivement pour
+  //    ne jamais renvoyer une liste vide quand des centres existent à proximité
+  //    (zones rurales comme Redon). Les centres hors rayon sont marqués.
+  if (centers.length === 0) {
+    for (const mult of [1.5, 2, 3]) {
+      const wide = dedupeSort((await runQuery(radiusKm * 1000 * mult)).map(toCenter));
+      if (wide.length > 0) {
+        centers = wide.map(c => ({
+          ...c,
+          outsideRadius: parseFloat(c.distance) > radiusKm,
+        }));
+        break;
+      }
+    }
+  }
 
   return centers.slice(0, 10);
 }
