@@ -191,7 +191,11 @@ async function callOpenRouterAPI(apiKey, prompt, systemInstruction) {
       await new Promise(r => setTimeout(r, 500));
     }
   }
-  throw new Error("Serveurs gratuits saturés. " + (lastError?.message || ""));
+  const msg = lastError?.message || "";
+  if (/subscription tier|not available/i.test(msg)) {
+    throw new Error("Modèles gratuits OpenRouter indisponibles pour ce compte (tier). Basculez sur Mistral AI dans le moteur d'IA.");
+  }
+  throw new Error("Serveurs gratuits saturés. " + msg);
 }
 
 // --- Dispatch vers le moteur actif ---
@@ -226,7 +230,7 @@ async function validateApiKey({ engine, key, geminiModel }) {
 
   try {
     if (engine === 'gemini') {
-      await callGeminiAPI(key, "Réponds 'OK'.", "Tu es un assistant de test.", geminiModel || 'gemini-2.5-pro');
+      await callGeminiAPI(key, "Réponds 'OK'.", "Tu es un assistant de test.", geminiModel || 'gemini-2.5-flash');
       return { success: true, message: "Clé API Gemini valide avec ce modèle !" };
     }
 

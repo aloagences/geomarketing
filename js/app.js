@@ -116,6 +116,15 @@ function loadSavedKeys() {
   const modelSelect = document.getElementById('modelSelect');
   if (savedModel && modelSelect) modelSelect.value = savedModel;
 
+  // Migration unique : OpenRouter (tier gratuit désormais bloqué → erreur
+  // « model not available in your subscription tier ») basculé vers Mistral.
+  if (!safeGetItem('migrated_off_openrouter')) {
+    if (safeGetItem(StorageKeys.ENGINE) === 'openrouter') {
+      safeSetItem(StorageKeys.ENGINE, 'mistral');
+    }
+    safeSetItem('migrated_off_openrouter', '1');
+  }
+
   const savedEngine = safeGetItem(StorageKeys.ENGINE) || 'mistral';
   const radio = document.querySelector(`input[name="aiEngine"][value="${savedEngine}"]`);
   if (radio) radio.checked = true;
