@@ -156,11 +156,11 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
       const err = await res.json().catch(() => ({}));
       if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
-        const e = new Error(
-          `Limite de requêtes ${label} atteinte (tier gratuit). ` +
-          `Patientez ${Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants'} ` +
-          `puis relancez, ou changez de moteur IA.`
-        );
+        const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants';
+        const hint = label.startsWith('Mistral')
+          ? `Le tier gratuit Mistral renvoie souvent cette erreur tant que le workspace n'est pas activé (vérification n° de téléphone sur console.mistral.ai). Alternative immédiate : Groq ou Gemini.`
+          : `Patientez ${wait} puis relancez, ou changez de moteur IA.`;
+        const e = new Error(`Limite de requêtes ${label} atteinte. ${hint}`);
         e.status = 429;
         e.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
         throw e;
@@ -314,13 +314,15 @@ async function validateApiKey({ engine, key, geminiModel }) {
     });
 
     // 429 = requête authentifiée mais limitée → la clé est valide, seulement
-    // throttlée. On la considère utilisable et on informe l'utilisateur.
+    // throttlée. Chez Mistral, un 429 immédiat vient souvent d'un workspace
+    // gratuit non activé (vérification tél. sur console.mistral.ai requise).
     if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
-      const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants';
+      const mistralHint = engine === 'mistral'
+        ? ' Si cela persiste, activez votre workspace sur console.mistral.ai (vérification n° de téléphone) ou utilisez Groq/Gemini (gratuits, sans activation).'
+        : ' Patientez quelques instants, ou utilisez un autre moteur (Groq/Gemini).';
       return {
         success: true,
-        message: `Clé ${cfg.label} valide (limite de requêtes atteinte — patientez ${wait} avant de générer).`,
+        message: `Clé ${cfg.label} valide, mais limite de requêtes atteinte.${mistralHint}`,
       };
     }
 
