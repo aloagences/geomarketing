@@ -295,7 +295,7 @@ async function validateApiKey({ engine, key, geminiModel }) {
 
     // Groq, OpenAI, Mistral - même pattern
     const configs = {
-      groq:    { url: "https://api.groq.com/openai/v1/chat/completions",  model: "llama-3.1-8b-instant", label: "Groq" },
+      groq:    { url: "https://api.groq.com/openai/v1/chat/completions",  model: "llama-3.3-70b-versatile", label: "Groq" },
       openai:  { url: "https://api.openai.com/v1/chat/completions",       model: "gpt-4o-mini",          label: "OpenAI" },
       mistral: { url: "https://api.mistral.ai/v1/chat/completions",       model: "mistral-small-latest", label: "Mistral AI" },
     };
