@@ -313,6 +313,17 @@ async function validateApiKey({ engine, key, geminiModel }) {
       }),
     });
 
+    // 429 = requête authentifiée mais limitée → la clé est valide, seulement
+    // throttlée. On la considère utilisable et on informe l'utilisateur.
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants';
+      return {
+        success: true,
+        message: `Clé ${cfg.label} valide (limite de requêtes atteinte — patientez ${wait} avant de générer).`,
+      };
+    }
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error?.message || err.message || `Code HTTP ${res.status}`);
