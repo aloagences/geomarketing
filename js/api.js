@@ -20,7 +20,13 @@ async function fetchWithRetry(fetchFn, delays = [1000, 2000, 4000]) {
     } catch (e) {
       lastError = e;
       if (i < delays.length) {
-        await new Promise(r => setTimeout(r, delays[i]));
+        // Sur limite de requêtes (429), on respecte le délai Retry-After
+        // fourni par le serveur (souvent plusieurs secondes), sinon un
+        // backoff plus long que la normale.
+        const wait = e?.status === 429
+          ? Math.max(e.retryAfterMs || 0, delays[i] * 2)
+          : delays[i];
+        await new Promise(r => setTimeout(r, wait));
       }
     }
   }
@@ -148,6 +154,17 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
+      if (res.status === 429) {
+        const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
+        const e = new Error(
+          `Limite de requêtes ${label} atteinte (tier gratuit). ` +
+          `Patientez ${Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants'} ` +
+          `puis relancez, ou changez de moteur IA.`
+        );
+        e.status = 429;
+        e.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
+        throw e;
+      }
       throw new Error(err.error?.message || err.message || `Erreur ${label} (${res.status})`);
     }
     const data = await res.json();
