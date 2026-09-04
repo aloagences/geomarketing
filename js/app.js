@@ -908,8 +908,15 @@ async function handleGenerate() {
     });
 
     // --- Construction du prompt IA ---
+    // On n'envoie que les champs utiles (nom, adresse, type, coords, distance)
+    // pour limiter la taille du prompt — les tiers gratuits (ex. Groq : 8000
+    // tokens/min) rejettent les requêtes trop volumineuses.
+    const slimPOIs = filteredPOIs.slice(0, 100).map(p => ({
+      name: p.name, address: p.address, type: p.type,
+      lat: p.lat, lng: p.lng, dist: p.distance,
+    }));
     let poiContext = filteredPOIs.length > 0
-      ? `BASE OSM DÉDIÉE :\n${JSON.stringify(filteredPOIs.slice(0, 100))}\n`
+      ? `BASE OSM DÉDIÉE :\n${JSON.stringify(slimPOIs)}\n`
       : 'BASE OSM VIDE.\n';
 
     if (preVerifiedCompetitors.length > 0) {
