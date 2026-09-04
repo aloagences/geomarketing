@@ -82,11 +82,12 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 }
 
 // --- Groq ---
+// Groq a retiré les modèles Llama ; catalogue actuel : openai/gpt-oss-*, qwen3, compound.
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
   return callOpenAICompatible(
     "https://api.groq.com/openai/v1/chat/completions",
     apiKey,
-    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
     prompt,
     systemInstruction,
     "Groq"
@@ -295,7 +296,7 @@ async function validateApiKey({ engine, key, geminiModel }) {
 
     // Groq, OpenAI, Mistral - même pattern
     const configs = {
-      groq:    { url: "https://api.groq.com/openai/v1/chat/completions",  model: "llama-3.3-70b-versatile", label: "Groq" },
+      groq:    { url: "https://api.groq.com/openai/v1/chat/completions",  model: "openai/gpt-oss-120b", label: "Groq" },
       openai:  { url: "https://api.openai.com/v1/chat/completions",       model: "gpt-4o-mini",          label: "OpenAI" },
       mistral: { url: "https://api.mistral.ai/v1/chat/completions",       model: "mistral-small-latest", label: "Mistral AI" },
     };
