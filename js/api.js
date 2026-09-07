@@ -19,6 +19,7 @@ async function fetchWithRetry(fetchFn, delays = [1000, 2000, 4000]) {
       return await fetchFn();
     } catch (e) {
       lastError = e;
+      if (e?.noRetry) throw e; // l'appelant gère lui-même (ex. bascule de modèle)
       if (i < delays.length) {
         // Sur limite de requêtes (429), on respecte le délai Retry-After
         // fourni par le serveur (souvent plusieurs secondes), sinon un
@@ -83,15 +84,29 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 
 // --- Groq ---
 // Groq a retiré les modèles Llama ; catalogue actuel : openai/gpt-oss-*, qwen3, compound.
+// La limite TPM (8000/min en gratuit) est PAR MODÈLE : en cas de 429, basculer
+// de modèle donne un compteur neuf — bien plus rapide que d'attendre ~20 s.
+const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b"];
+
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
-  return callOpenAICompatible(
-    "https://api.groq.com/openai/v1/chat/completions",
-    apiKey,
-    "openai/gpt-oss-120b",
-    prompt,
-    systemInstruction,
-    "Groq"
-  );
+  let lastErr;
+  for (let i = 0; i < GROQ_MODELS.length; i++) {
+    const isLast = i === GROQ_MODELS.length - 1;
+    try {
+      return await callOpenAICompatible(
+        "https://api.groq.com/openai/v1/chat/completions",
+        apiKey, GROQ_MODELS[i], prompt, systemInstruction, "Groq",
+        { retry429: isLast } // seul le dernier modèle attend le délai du 429
+      );
+    } catch (e) {
+      lastErr = e;
+      const switchable = e?.status === 429
+        || /rate limit|does not exist|not found|not available|access/i.test(e?.message || '');
+      if (!switchable || isLast) throw e;
+      console.warn(`[Groq] ${GROQ_MODELS[i]} saturé/indisponible → bascule sur ${GROQ_MODELS[i + 1]}…`);
+    }
+  }
+  throw lastErr;
 }
 
 // --- OpenAI ---
@@ -133,7 +148,7 @@ async function callMistralAPI(apiKey, prompt, systemInstruction) {
 /**
  * Appel générique pour toute API compatible OpenAI (Groq, OpenAI, Mistral).
  */
-async function callOpenAICompatible(url, apiKey, model, prompt, systemInstruction, label) {
+async function callOpenAICompatible(url, apiKey, model, prompt, systemInstruction, label, opts = {}) {
   const body = {
     model,
     messages: [
@@ -170,6 +185,8 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
         const e = new Error(`Limite de requêtes ${label} atteinte. ${hint}`);
         e.status = 429;
         e.retryAfterMs = retryMs;
+        // retry429:false → l'appelant bascule immédiatement de modèle
+        if (opts.retry429 === false) e.noRetry = true;
         throw e;
       }
       throw new Error(err.error?.message || err.message || `Erreur ${label} (${res.status})`);
