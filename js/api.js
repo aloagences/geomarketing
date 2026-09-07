@@ -83,14 +83,13 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 }
 
 // --- Groq ---
-// Catalogue Groq (2026) : llama-3.3-70b, llama-3.1-70b, mixtral-8x7b, gemma-7b.
-// La limite TPM (8000/min en gratuit) est PAR MODÈLE : en cas de 429, basculer
-// de modèle donne un compteur neuf — bien plus rapide que d'attendre ~20 s.
+// Modèles stables Groq : llama-3.3-70b et llama-3.1-70b. La limite TPM
+// (8000/min gratuit) est PAR MODÈLE : en cas de 429, basculer donne un
+// compteur neuf. Si tous deux sont saturés, callActiveAI bascule vers
+// Gemini/Mistral/OpenAI automatiquement.
 const GROQ_MODELS = [
   "llama-3.3-70b-versatile",
   "llama-3.1-70b-versatile",
-  "mixtral-8x7b-32768",
-  "gemma-7b-it",
 ];
 
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
@@ -101,12 +100,12 @@ async function callGroqAPI(apiKey, prompt, systemInstruction) {
       return await callOpenAICompatible(
         "https://api.groq.com/openai/v1/chat/completions",
         apiKey, GROQ_MODELS[i], prompt, systemInstruction, "Groq",
-        { retry429: isLast } // seul le dernier modèle attend le délai du 429
+        { retry429: isLast }
       );
     } catch (e) {
       lastErr = e;
       const switchable = e?.status === 429
-        || /rate limit|does not exist|not found|not available|access|model/i.test(e?.message || '');
+        || /rate limit|does not exist|not found|not available|decommissioned|deprecated/i.test(e?.message || '');
       if (!switchable || isLast) throw e;
       console.warn(`[Groq] ${GROQ_MODELS[i]} saturé/indisponible → bascule sur ${GROQ_MODELS[i + 1]}…`);
     }
