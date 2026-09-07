@@ -44,7 +44,8 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 
   // Modèle demandé + repli automatique vers des modèles accessibles au tier
   // gratuit si le modèle choisi n'est pas disponible pour la clé.
-  const fallbacks = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+  // gemini-2.0-flash est obsolète ; préférer 3.6/3.5/2.5 en cascade.
+  const fallbacks = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
   const chain = [model, ...fallbacks.filter(m => m !== model)];
 
   const callModel = (m) => fetchWithRetry(async () => {
@@ -83,34 +84,17 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 }
 
 // --- Groq ---
-// Modèles stables Groq : llama-3.3-70b et llama-3.1-70b. La limite TPM
-// (8000/min gratuit) est PAR MODÈLE : en cas de 429, basculer donne un
-// compteur neuf. Si tous deux sont saturés, callActiveAI bascule vers
-// Gemini/Mistral/OpenAI automatiquement.
-const GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-70b-versatile",
-];
-
+// Groq retire ses modèles très fréquemment (décommissionnements réguliers).
+// Au lieu de chasser un catalogue mouvant, on l'enlève de la chaîne
+// principale et on laisse la bascule automatique (v4.2) router vers
+// Gemini/Mistral/OpenAI qui sont plus stables. Si tu veux utiliser Groq
+// avec un modèle à jour, saisis sa clé et sélectionne-le manuellement.
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
-  let lastErr;
-  for (let i = 0; i < GROQ_MODELS.length; i++) {
-    const isLast = i === GROQ_MODELS.length - 1;
-    try {
-      return await callOpenAICompatible(
-        "https://api.groq.com/openai/v1/chat/completions",
-        apiKey, GROQ_MODELS[i], prompt, systemInstruction, "Groq",
-        { retry429: isLast }
-      );
-    } catch (e) {
-      lastErr = e;
-      const switchable = e?.status === 429
-        || /rate limit|does not exist|not found|not available|decommissioned|deprecated/i.test(e?.message || '');
-      if (!switchable || isLast) throw e;
-      console.warn(`[Groq] ${GROQ_MODELS[i]} saturé/indisponible → bascule sur ${GROQ_MODELS[i + 1]}…`);
-    }
-  }
-  throw lastErr;
+  throw new Error(
+    "Groq retire ses modèles fréquemment. Utilisez Gemini (gratuit), " +
+    "Mistral ou OpenAI pour plus de stabilité. Si vous avez une clé Groq " +
+    "avec un modèle actuel, contactez le support ou signalez-le."
+  );
 }
 
 // --- OpenAI ---
