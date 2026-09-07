@@ -156,14 +156,20 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       if (res.status === 429) {
-        const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
-        const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? `${retryAfter}s` : 'quelques instants';
+        const headerRetry = parseInt(res.headers.get('retry-after') || '', 10);
+        // Groq indique le délai exact dans le message : « try again in 7.7s »
+        const apiMsg = err.error?.message || err.message || '';
+        const msgMatch = apiMsg.match(/try again in ([\d.]+)\s*s/i);
+        const retryMs = Number.isFinite(headerRetry) && headerRetry > 0
+          ? headerRetry * 1000
+          : (msgMatch ? Math.ceil(parseFloat(msgMatch[1]) * 1000) + 500 : 0);
+        const wait = retryMs > 0 ? `${Math.ceil(retryMs / 1000)}s` : 'quelques instants';
         const hint = label.startsWith('Mistral')
           ? `Le tier gratuit Mistral renvoie souvent cette erreur tant que le workspace n'est pas activé (vérification n° de téléphone sur console.mistral.ai). Alternative immédiate : Groq ou Gemini.`
           : `Patientez ${wait} puis relancez, ou changez de moteur IA.`;
         const e = new Error(`Limite de requêtes ${label} atteinte. ${hint}`);
         e.status = 429;
-        e.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
+        e.retryAfterMs = retryMs;
         throw e;
       }
       throw new Error(err.error?.message || err.message || `Erreur ${label} (${res.status})`);
