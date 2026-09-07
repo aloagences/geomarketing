@@ -250,20 +250,38 @@ function throttleAI(task) {
   return run;
 }
 
-async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
-  const engine = keys.activeEngine;
-  const key = keys[engine];
-  if (!key) throw new Error(`Clé API ${engine} manquante.`);
+function dispatchAI(engine, key, prompt, systemInstruction, geminiModel) {
+  switch (engine) {
+    case 'groq':       return callGroqAPI(key, prompt, systemInstruction);
+    case 'openai':     return callOpenAIAPI(key, prompt, systemInstruction);
+    case 'mistral':    return callMistralAPI(key, prompt, systemInstruction);
+    case 'openrouter': return callOpenRouterAPI(key, prompt, systemInstruction);
+    default:           return callGeminiAPI(key, prompt, systemInstruction, geminiModel);
+  }
+}
 
-  return throttleAI(() => {
-    switch (engine) {
-      case 'groq':       return callGroqAPI(key, prompt, systemInstruction);
-      case 'openai':     return callOpenAIAPI(key, prompt, systemInstruction);
-      case 'mistral':    return callMistralAPI(key, prompt, systemInstruction);
-      case 'openrouter': return callOpenRouterAPI(key, prompt, systemInstruction);
-      default:           return callGeminiAPI(key, prompt, systemInstruction, geminiModel);
+async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
+  // Moteur actif d'abord, puis bascule automatique sur les autres moteurs
+  // dont une clé est renseignée, si le moteur actif est en limite de
+  // requêtes / quota / modèle indisponible.
+  const order = ['groq', 'gemini', 'mistral', 'openai', 'openrouter'];
+  const engines = [keys.activeEngine, ...order.filter(e => e !== keys.activeEngine)]
+    .filter(e => keys[e]);
+  if (engines.length === 0) throw new Error(`Clé API ${keys.activeEngine} manquante.`);
+
+  let lastErr;
+  for (const engine of engines) {
+    try {
+      return await throttleAI(() => dispatchAI(engine, keys[engine], prompt, systemInstruction, geminiModel));
+    } catch (e) {
+      lastErr = e;
+      const switchable = e?.status === 429
+        || /429|limite de requêtes|rate limit|too large|subscription tier|quota|not available|not found|does not exist|access/i.test(e?.message || '');
+      if (!switchable || engine === engines[engines.length - 1]) throw e;
+      console.warn(`[IA] ${engine} indisponible (${(e?.message || '').slice(0, 120)}) → bascule sur ${engines[engines.indexOf(engine) + 1]}…`);
     }
-  });
+  }
+  throw lastErr;
 }
 
 // ========================================
