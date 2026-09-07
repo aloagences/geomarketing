@@ -83,10 +83,15 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 }
 
 // --- Groq ---
-// Groq a retiré les modèles Llama ; catalogue actuel : openai/gpt-oss-*, qwen3, compound.
+// Catalogue Groq (2026) : llama-3.3-70b, llama-3.1-70b, mixtral-8x7b, gemma-7b.
 // La limite TPM (8000/min en gratuit) est PAR MODÈLE : en cas de 429, basculer
 // de modèle donne un compteur neuf — bien plus rapide que d'attendre ~20 s.
-const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3-32b"];
+const GROQ_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-70b-versatile",
+  "mixtral-8x7b-32768",
+  "gemma-7b-it",
+];
 
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
   let lastErr;
@@ -101,7 +106,7 @@ async function callGroqAPI(apiKey, prompt, systemInstruction) {
     } catch (e) {
       lastErr = e;
       const switchable = e?.status === 429
-        || /rate limit|does not exist|not found|not available|access/i.test(e?.message || '');
+        || /rate limit|does not exist|not found|not available|access|model/i.test(e?.message || '');
       if (!switchable || isLast) throw e;
       console.warn(`[Groq] ${GROQ_MODELS[i]} saturé/indisponible → bascule sur ${GROQ_MODELS[i + 1]}…`);
     }
