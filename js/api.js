@@ -229,18 +229,41 @@ async function callOpenRouterAPI(apiKey, prompt, systemInstruction) {
 }
 
 // --- Dispatch vers le moteur actif ---
+// Limiteur de débit global : les tiers gratuits (Mistral, Groq…) plafonnent
+// souvent à ~1 requête/seconde. On sérialise TOUS les appels IA et on garantit
+// un espacement minimal entre deux départs de requête pour éviter les 429.
+const AI_MIN_INTERVAL_MS = 1300;
+let _aiChain = Promise.resolve();
+let _aiLastStart = 0;
+
+function throttleAI(task) {
+  const run = _aiChain.then(async () => {
+    const since = Date.now() - _aiLastStart;
+    if (since < AI_MIN_INTERVAL_MS) {
+      await new Promise(r => setTimeout(r, AI_MIN_INTERVAL_MS - since));
+    }
+    _aiLastStart = Date.now();
+    return task();
+  });
+  // La chaîne ne doit jamais rester rejetée, sinon les appels suivants échouent.
+  _aiChain = run.then(() => {}, () => {});
+  return run;
+}
+
 async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
   const engine = keys.activeEngine;
   const key = keys[engine];
   if (!key) throw new Error(`Clé API ${engine} manquante.`);
 
-  switch (engine) {
-    case 'groq':       return callGroqAPI(key, prompt, systemInstruction);
-    case 'openai':     return callOpenAIAPI(key, prompt, systemInstruction);
-    case 'mistral':    return callMistralAPI(key, prompt, systemInstruction);
-    case 'openrouter': return callOpenRouterAPI(key, prompt, systemInstruction);
-    default:           return callGeminiAPI(key, prompt, systemInstruction, geminiModel);
-  }
+  return throttleAI(() => {
+    switch (engine) {
+      case 'groq':       return callGroqAPI(key, prompt, systemInstruction);
+      case 'openai':     return callOpenAIAPI(key, prompt, systemInstruction);
+      case 'mistral':    return callMistralAPI(key, prompt, systemInstruction);
+      case 'openrouter': return callOpenRouterAPI(key, prompt, systemInstruction);
+      default:           return callGeminiAPI(key, prompt, systemInstruction, geminiModel);
+    }
+  });
 }
 
 // ========================================
