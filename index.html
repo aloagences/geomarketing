@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v4.8 — 7 septembre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v4.9 — 7 septembre 2026</span>
       </div>
     </header>
 
@@ -84,12 +84,10 @@
                     <input type="radio" name="aiEngine" value="openrouter" class="mr-2 w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer" />
                     OpenRouter
                   </label>
-                  <div class="flex gap-2">
-                    <input type="password" id="openrouterKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="sk-or-v1-..." />
-                    <button id="validateOpenRouterKeyBtn" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
-                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
-                    </button>
-                  </div>
+                  <textarea id="openrouterKeyInput" class="input-style text-sm border-gray-200 w-full p-2 rounded font-mono text-xs resize-none" rows="3" placeholder="sk-or-v1-..."></textarea>
+                  <button id="validateOpenRouterKeyBtn" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-colors mt-2 w-full justify-center">
+                    <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                  </button>
                   <p id="openrouterKeyStatusText" class="text-xs mt-1 hidden"></p>
                   <p class="text-[10px] text-gray-500 mt-1.5 leading-tight"><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline font-semibold">Obtenir une clé ici</a>. Contourne le blocage européen de Google.</p>
                 </div>
@@ -100,17 +98,16 @@
                     <input type="radio" name="aiEngine" value="gemini" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
                     Google Gemini
                   </label>
-                  <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="password" id="apiKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="AIzaSy..." />
-                    <select id="modelSelect" class="input-style text-sm border-gray-200 w-full sm:w-auto bg-white py-2 px-3">
-                      <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (recommandé)</option>
-                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (tier payant)</option>
-                      <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                    </select>
-                    <button id="validateKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
-                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
-                    </button>
-                  </div>
+                  <textarea id="apiKeyInput" class="input-style text-sm border-gray-200 w-full p-2 rounded font-mono text-xs resize-none mb-2" rows="3" placeholder="AIzaSy..."></textarea>
+                  <select id="modelSelect" class="input-style text-sm border-gray-200 w-full bg-white py-2 px-3 mb-2">
+                    <option value="gemini-3.6-flash">Gemini 3.6 Flash (recommandé)</option>
+                    <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (tier payant)</option>
+                  </select>
+                  <button id="validateKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-colors w-full justify-center">
+                    <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                  </button>
                   <p id="keyStatusText" class="text-xs mt-1 hidden"></p>
                   <p class="text-[10px] text-gray-500 mt-1.5">Nécessite une CB (Facturation) en Europe.</p>
                 </div>
@@ -121,12 +118,10 @@
                     <input type="radio" name="aiEngine" value="groq" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
                     Groq (Ultra Rapide)
                   </label>
-                  <div class="flex gap-2">
-                    <input type="password" id="groqKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="gsk_..." />
-                    <button id="validateGroqKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
-                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
-                    </button>
-                  </div>
+                  <textarea id="groqKeyInput" class="input-style text-sm border-gray-200 w-full p-2 rounded font-mono text-xs resize-none" rows="3" placeholder="gsk_..."></textarea>
+                  <button id="validateGroqKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-colors mt-2 w-full justify-center">
+                    <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                  </button>
                   <p id="groqKeyStatusText" class="text-xs mt-1 hidden"></p>
                 </div>
 
@@ -136,12 +131,10 @@
                     <input type="radio" name="aiEngine" value="openai" class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
                     OpenAI (ChatGPT)
                   </label>
-                  <div class="flex gap-2">
-                    <input type="password" id="openaiKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="sk-proj-..." />
-                    <button id="validateOpenAIKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
-                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
-                    </button>
-                  </div>
+                  <textarea id="openaiKeyInput" class="input-style text-sm border-gray-200 w-full p-2 rounded font-mono text-xs resize-none" rows="3" placeholder="sk-proj-..."></textarea>
+                  <button id="validateOpenAIKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-colors mt-2 w-full justify-center">
+                    <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                  </button>
                   <p id="openaiKeyStatusText" class="text-xs mt-1 hidden"></p>
                 </div>
 
@@ -151,12 +144,10 @@
                     <input type="radio" name="aiEngine" value="mistral" checked class="mr-2 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" />
                     Mistral AI (Europe) — Recommandé
                   </label>
-                  <div class="flex gap-2">
-                    <input type="password" id="mistralKeyInput" class="input-style text-sm border-gray-200 flex-1" placeholder="Renseignez votre clé Mistral..." />
-                    <button id="validateMistralKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center transition-colors whitespace-nowrap">
-                      <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
-                    </button>
-                  </div>
+                  <textarea id="mistralKeyInput" class="input-style text-sm border-gray-200 w-full p-2 rounded font-mono text-xs resize-none" rows="3" placeholder="Renseignez votre clé Mistral..."></textarea>
+                  <button id="validateMistralKeyBtn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-colors mt-2 w-full justify-center">
+                    <i data-lucide="check-circle" class="w-4 h-4 mr-1"></i> Vérifier
+                  </button>
                   <p id="mistralKeyStatusText" class="text-xs mt-1 hidden"></p>
                 </div>
 
@@ -625,10 +616,10 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=4.8"></script>
-  <script src="js/api.js?v=4.8"></script>
-  <script src="js/map.js?v=4.8"></script>
-  <script src="js/export.js?v=4.8"></script>
-  <script src="js/app.js?v=4.8"></script>
+  <script src="js/utils.js?v=4.9"></script>
+  <script src="js/api.js?v=4.9"></script>
+  <script src="js/map.js?v=4.9"></script>
+  <script src="js/export.js?v=4.9"></script>
+  <script src="js/app.js?v=4.9"></script>
 </body>
 </html>
