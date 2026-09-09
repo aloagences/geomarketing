@@ -72,11 +72,20 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 function cleanJson(text) {
   if (!text) throw new Error("Le texte renvoyé par l'IA est vide.");
+
+  // 1) Essayer d'extraire du JSON depuis markdown ```json...```
+  const mdMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (mdMatch) text = mdMatch[1];
+
+  // 2) Chercher accolades balancées
   const firstBrace = text.indexOf('{');
   const lastBrace = text.lastIndexOf('}');
   if (firstBrace === -1 || lastBrace === -1) {
-    throw new Error("Format JSON invalide renvoyé par l'IA.");
+    console.error('Réponse brute IA:', text.slice(0, 500));
+    throw new Error("Format JSON invalide. Réponse brute affichée en console (premiers 500 chars). L'IA n'a peut-être pas généré du JSON valide — relancez ou changez de moteur.");
   }
+
+  // 3) Nettoyer et retourner
   return text.substring(firstBrace, lastBrace + 1).replace(/[\x00-\x1F]+/g, ' ');
 }
 

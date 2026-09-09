@@ -39,7 +39,8 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     systemInstruction: { parts: [{ text: systemInstruction }] },
-    generationConfig: { responseMimeType: "application/json" },
+    // Note: responseMimeType "application/json" n'est pas fiable pour 3.6/3.5.
+    // Laisser Gemini retourner du texte ; cleanJson() l'extrait robustement.
   };
 
   // Modèle demandé + repli automatique vers des modèles accessibles au tier
