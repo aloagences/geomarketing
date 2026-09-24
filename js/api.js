@@ -86,16 +86,14 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
 
 // --- Groq ---
 // Groq retire ses modèles très fréquemment (décommissionnements réguliers).
-// Au lieu de chasser un catalogue mouvant, on l'enlève de la chaîne
-// principale et on laisse la bascule automatique (v4.2) router vers
-// Gemini/Mistral/OpenAI qui sont plus stables. Si tu veux utiliser Groq
-// avec un modèle à jour, saisis sa clé et sélectionne-le manuellement.
+// Désactivé : lance une exception switchable pour forcer la bascule automatique.
 async function callGroqAPI(apiKey, prompt, systemInstruction) {
-  throw new Error(
+  const e = new Error(
     "Groq retire ses modèles fréquemment. Utilisez Gemini (gratuit), " +
-    "Mistral ou OpenAI pour plus de stabilité. Si vous avez une clé Groq " +
-    "avec un modèle actuel, contactez le support ou signalez-le."
+    "Mistral ou OpenAI pour plus de stabilité."
   );
+  e.status = 410; // Gone — force switchable
+  throw e;
 }
 
 // --- OpenAI ---
