@@ -274,10 +274,18 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
   // Moteur actif d'abord, puis bascule automatique sur les autres moteurs
   // dont une clé est renseignée, si le moteur actif est en limite de
   // requêtes / quota / modèle indisponible.
-  const order = ['groq', 'gemini', 'mistral', 'openai', 'openrouter'];
+  // Groq exclu du fallback auto (modèles décommissionnés en permanence) —
+  // reste utilisable uniquement si explicitement sélectionné.
+  const order = ['gemini', 'mistral', 'openai', 'openrouter', 'groq'];
   const engines = [keys.activeEngine, ...order.filter(e => e !== keys.activeEngine)]
-    .filter(e => keys[e]);
-  if (engines.length === 0) throw new Error(`Clé API ${keys.activeEngine} manquante.`);
+    .filter(e => keys[e])
+    .filter(e => e === keys.activeEngine || e !== 'groq');
+  if (engines.length === 0) {
+    throw new Error(
+      `Aucune clé API valide trouvée pour ${ENGINE_CONFIG[keys.activeEngine]?.label || keys.activeEngine}. ` +
+      `Vérifiez que la clé est bien saisie ET validée (bouton « Vérifier » vert) dans le champ correspondant.`
+    );
+  }
 
   let lastErr;
   for (const engine of engines) {
