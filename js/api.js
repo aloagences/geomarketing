@@ -186,11 +186,16 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
 }
 
 // --- OpenRouter (fallback multi-modèles gratuits) ---
+// Catalogue de modèles gratuits OpenRouter changeant régulièrement : liste
+// élargie pour maximiser les chances qu'au moins un modèle réponde.
 const OPENROUTER_FREE_MODELS = [
   "meta-llama/llama-3.3-70b-instruct:free",
   "qwen/qwen-2.5-72b-instruct:free",
   "mistralai/mistral-nemo:free",
-  "google/gemini-2.0-flash-thinking-exp:free",
+  "google/gemini-2.0-flash-exp:free",
+  "deepseek/deepseek-chat:free",
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "microsoft/phi-3-medium-128k-instruct:free",
 ];
 
 async function callOpenRouterAPI(apiKey, prompt, systemInstruction) {
@@ -235,7 +240,10 @@ async function callOpenRouterAPI(apiKey, prompt, systemInstruction) {
   if (/subscription tier|not available/i.test(msg)) {
     throw new Error("Modèles gratuits OpenRouter indisponibles pour ce compte (tier). Basculez sur Mistral AI dans le moteur d'IA.");
   }
-  throw new Error("Serveurs gratuits saturés. " + msg);
+  throw new Error(
+    `Tous les modèles gratuits OpenRouter (${OPENROUTER_FREE_MODELS.length}) ont échoué. ` +
+    `Dernière erreur : ${msg}. Essayez Gemini ou une clé Mistral valide.`
+  );
 }
 
 // --- Dispatch vers le moteur actif ---
