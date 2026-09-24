@@ -1,51 +1,6 @@
 /**
- * export.js - Exports PDF, CSV, KML
+ * export.js - PDF export uniquement
  */
-
-// ========================================
-// CSV
-// ========================================
-
-function generateCSV(data, brandName) {
-  if (!data) return;
-  let csv = "\uFEFFNom,Description,Type,Latitude,Longitude\n";
-
-  if (data.shopLocation) {
-    csv += `"Magasin QG","${sanitize(data.shopLocation.address)}","QG",${data.shopLocation.lat},${data.shopLocation.lng}\n`;
-  }
-
-  (data.dailyPlans || []).forEach(day => {
-    (day.stops || []).forEach(stop => {
-      csv += `"${sanitize(day.day)} - ${sanitize(stop.time)}","${sanitize(stop.locationName)} - ${sanitize(stop.address)}","${sanitize(day.role)}",${stop.lat},${stop.lng}\n`;
-    });
-  });
-
-  downloadBlob(csv, `Plan_${safeName(brandName)}.csv`, 'text/csv;charset=utf-8;');
-}
-
-// ========================================
-// KML
-// ========================================
-
-function generateKML(data) {
-  if (!data) return;
-  const c = str => (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9 .,-]/g, '');
-
-  let kml = '<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Export Campagne</name>';
-
-  if (data.shopLocation) {
-    kml += `<Placemark><name>QG</name><Point><coordinates>${data.shopLocation.lng},${data.shopLocation.lat}</coordinates></Point></Placemark>`;
-  }
-
-  (data.dailyPlans || []).forEach(day => {
-    (day.stops || []).forEach(stop => {
-      kml += `<Placemark><name>${c(day.day)} - ${c(stop.time)}</name><description>${c(stop.locationName)} (${c(stop.address)})</description><Point><coordinates>${stop.lng},${stop.lat}</coordinates></Point></Placemark>`;
-    });
-  });
-
-  kml += '</Document></kml>';
-  downloadBlob(kml, 'Plan_Export.kml', 'application/vnd.google-earth.kml+xml');
-}
 
 // ========================================
 // PDF (Premium A4 Paysage)

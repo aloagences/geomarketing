@@ -2097,7 +2097,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Événements
   el.btn.addEventListener('click', handleGenerate);
-  document.getElementById('downloadKmlBtn').addEventListener('click', () => generateKML(generatedData));
-  document.getElementById('downloadCsvBtn').addEventListener('click', () => generateCSV(generatedData, inputRefs.brand.value));
   document.getElementById('downloadPdfBtn').addEventListener('click', () => generateFullPDF(generatedData, inputRefs));
 });
