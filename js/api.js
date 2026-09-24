@@ -282,9 +282,9 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
   // Moteur actif d'abord, puis bascule automatique sur les autres moteurs
   // dont une clé est renseignée, si le moteur actif est en limite de
   // requêtes / quota / modèle indisponible.
-  // Groq exclu du fallback auto (modèles décommissionnés en permanence) —
-  // reste utilisable uniquement si explicitement sélectionné.
-  const order = ['gemini', 'mistral', 'openai', 'openrouter', 'groq'];
+  // Groq et OpenRouter exclus du fallback auto (instabilité/modèles obsolètes)
+  // — restent utilisables uniquement si explicitement sélectionnés.
+  const order = ['gemini', 'mistral', 'openai'];
   const engines = [keys.activeEngine, ...order.filter(e => e !== keys.activeEngine)]
     .filter(e => keys[e])
     .filter(e => e === keys.activeEngine || e !== 'groq');
