@@ -909,9 +909,8 @@ async function handleGenerate() {
 
     // --- Construction du prompt IA ---
     // On n'envoie que les champs utiles (nom, adresse, type, coords, distance)
-    // pour limiter la taille du prompt — les tiers gratuits (ex. Groq : 8000
-    // tokens/min) rejettent les requêtes trop volumineuses.
-    const slimPOIs = filteredPOIs.slice(0, 100).map(p => ({
+    // et limité à 50 POI pour accélérer — moins de tokens = génération rapide.
+    const slimPOIs = filteredPOIs.slice(0, 50).map(p => ({
       name: p.name, address: p.address, type: p.type,
       lat: p.lat, lng: p.lng, dist: p.distance,
     }));
