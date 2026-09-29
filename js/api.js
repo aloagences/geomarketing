@@ -21,14 +21,14 @@ async function fetchWithRetry(fetchFn, delays = [2000, 5000, 10000, 15000]) {
       lastError = e;
       if (e?.noRetry) throw e; // l'appelant gère lui-même (ex. bascule de modèle)
 
-      // Détecte si l'erreur est "retryable" (high demand, rate limit, service unavailable)
-      const isRetryable =
-        e?.status === 429 ||  // Rate limit
-        e?.status === 503 ||  // Service unavailable
-        e?.status === 500 ||  // Server error
-        /high demand|temporarily unavailable|service unavailable|try again later/i.test(e.message || '');
+      // Détecte si l'erreur est "retryable" — teste d'abord le MESSAGE car
+      // "high demand" peut venir d'un status 400/429 avec message spécifique
+      const messageIsRetryable = /high demand|temporarily unavailable|service unavailable|try again later/i.test(e.message || '');
+      const statusIsRetryable = e?.status === 429 || e?.status === 503 || e?.status === 500;
+      const isRetryable = messageIsRetryable || statusIsRetryable;
 
-      if (!isRetryable && i > 0) throw e; // Erreur non-retryable → on remonte
+      // Erreur non-retryable → on remonte immédiatement sans attendre
+      if (!isRetryable) throw e;
 
       if (i < delays.length) {
         // Sur limite de requêtes (429), on respecte le délai Retry-After
@@ -37,7 +37,7 @@ async function fetchWithRetry(fetchFn, delays = [2000, 5000, 10000, 15000]) {
         const wait = e?.status === 429
           ? Math.max(e.retryAfterMs || 0, delays[i] * 2)
           : delays[i];
-        console.warn(`[Retry ${i + 1}/${delays.length}] Attente ${wait}ms avant nouvelle tentative...`);
+        console.warn(`[Retry ${i + 1}/${delays.length}] Tentative pour "${e.message.substring(0, 50)}..." — Attente ${wait}ms`);
         await new Promise(r => setTimeout(r, wait));
       }
     }
@@ -69,9 +69,10 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      const msg = err.error?.message || `Erreur Gemini (${res.status})`;
+      const msg = err.error?.message || err.message || `Erreur Gemini (${res.status})`;
       const tierError = res.status === 403 || res.status === 404
         || /subscription tier|not available|not found|not supported/i.test(msg);
+      console.error(`[Gemini Error ${res.status}] ${msg}`); // Debug log
       const e = new Error(msg);
       e.tierError = tierError;
       e.status = res.status; // Ajoute le status HTTP pour détection de retry
@@ -191,6 +192,7 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
       }
 
       // Détecte erreurs serveur (500, 503) et messages de surcharge
+      console.error(`[${label} Error ${res.status}] ${apiMsg}`); // Debug log
       const e = new Error(apiMsg || `Erreur ${label} (${res.status})`);
       e.status = res.status;
       throw e;
