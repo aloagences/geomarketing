@@ -320,10 +320,15 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
       return await throttleAI(() => dispatchAI(engine, keys[engine], prompt, systemInstruction, geminiModel));
     } catch (e) {
       lastErr = e;
-      const switchable = e?.status === 429
-        || /429|limite de requêtes|rate limit|too large|subscription tier|quota|not available|not found|does not exist|access/i.test(e?.message || '');
-      if (!switchable || engine === engines[engines.length - 1]) throw e;
-      console.warn(`[IA] ${engine} indisponible (${(e?.message || '').slice(0, 120)}) → bascule sur ${engines[engines.indexOf(engine) + 1]}…`);
+      // Ne basculer QUE sur les erreurs de TIER/ACCÈS, jamais sur quota/rate-limit/high-demand
+      // Si l'utilisateur a choisi un moteur et il y a saturation temporaire, relancer l'erreur
+      // pour que les retries automatiques (fetchWithRetry) la gèrent
+      const isTierError = /subscription tier|not available|not found|does not exist|401|403|access denied/i.test(e?.message || '')
+        && !/quota|429|rate limit|high demand/i.test(e?.message || '');
+      const isLastEngine = engine === engines[engines.length - 1];
+
+      if (!isTierError || isLastEngine) throw e; // Relance si pas erreur tier OU c'est le dernier moteur
+      console.warn(`[IA] ${engine} indisponible (tier/accès) → bascule sur ${engines[engines.indexOf(engine) + 1]}…`);
     }
   }
   throw lastErr;
