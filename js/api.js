@@ -170,7 +170,9 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      const apiMsg = err.error?.message || err.message || '';
+      // Essaie plusieurs chemins pour extraire le message d'erreur
+      const apiMsg = err.error?.message || err.message || err.detail || err.errors?.[0]?.message || '';
+      const fullErrorMsg = apiMsg ? `${label}: ${apiMsg}` : `Erreur ${label} (${res.status})`;
 
       if (res.status === 429) {
         const headerRetry = parseInt(res.headers.get('retry-after') || '', 10);
@@ -192,8 +194,8 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
       }
 
       // Détecte erreurs serveur (500, 503) et messages de surcharge
-      console.error(`[${label} Error ${res.status}] ${apiMsg}`); // Debug log
-      const e = new Error(apiMsg || `Erreur ${label} (${res.status})`);
+      console.error(`[${label} Error ${res.status}] ${fullErrorMsg}`); // Debug log
+      const e = new Error(fullErrorMsg);
       e.status = res.status;
       throw e;
     }
@@ -307,6 +309,7 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
   const engines = [keys.activeEngine, ...order.filter(e => e !== keys.activeEngine)]
     .filter(e => keys[e])
     .filter(e => e === keys.activeEngine || e !== 'groq');
+  console.log(`[IA] Moteur actif: ${keys.activeEngine}, ordre essai: [${engines.join(', ')}]`);
   if (engines.length === 0) {
     throw new Error(
       `Aucune clé API valide trouvée pour ${ENGINE_CONFIG[keys.activeEngine]?.label || keys.activeEngine}. ` +
@@ -317,6 +320,7 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
   let lastErr;
   for (const engine of engines) {
     try {
+      console.log(`[IA] Essai avec ${engine}…`);
       return await throttleAI(() => dispatchAI(engine, keys[engine], prompt, systemInstruction, geminiModel));
     } catch (e) {
       lastErr = e;
@@ -327,7 +331,12 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
         && !/quota|429|rate limit|high demand/i.test(e?.message || '');
       const isLastEngine = engine === engines[engines.length - 1];
 
-      if (!isTierError || isLastEngine) throw e; // Relance si pas erreur tier OU c'est le dernier moteur
+      console.error(`[IA] ${engine} erreur: ${(e?.message || '').slice(0, 100)}... isTierError=${isTierError}, isLastEngine=${isLastEngine}`);
+
+      if (!isTierError || isLastEngine) {
+        console.error(`[IA] Erreur non-basculable ou dernier moteur → RELANCE`);
+        throw e;
+      }
       console.warn(`[IA] ${engine} indisponible (tier/accès) → bascule sur ${engines[engines.indexOf(engine) + 1]}…`);
     }
   }
