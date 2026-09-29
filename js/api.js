@@ -12,7 +12,7 @@
  * @param {number[]} delays - Délais entre les tentatives (ms)
  * @returns {Promise<string>} - Contenu texte de la réponse
  */
-async function fetchWithRetry(fetchFn, delays = [1000, 2000, 4000]) {
+async function fetchWithRetry(fetchFn, delays = [2000, 5000, 10000, 15000]) {
   let lastError;
   for (let i = 0; i <= delays.length; i++) {
     try {
@@ -20,13 +20,24 @@ async function fetchWithRetry(fetchFn, delays = [1000, 2000, 4000]) {
     } catch (e) {
       lastError = e;
       if (e?.noRetry) throw e; // l'appelant gère lui-même (ex. bascule de modèle)
+
+      // Détecte si l'erreur est "retryable" (high demand, rate limit, service unavailable)
+      const isRetryable =
+        e?.status === 429 ||  // Rate limit
+        e?.status === 503 ||  // Service unavailable
+        e?.status === 500 ||  // Server error
+        /high demand|temporarily unavailable|service unavailable|try again later/i.test(e.message || '');
+
+      if (!isRetryable && i > 0) throw e; // Erreur non-retryable → on remonte
+
       if (i < delays.length) {
         // Sur limite de requêtes (429), on respecte le délai Retry-After
-        // fourni par le serveur (souvent plusieurs secondes), sinon un
-        // backoff plus long que la normale.
+        // fourni par le serveur (souvent plusieurs secondes), sinon on utilise
+        // le backoff exponentiel.
         const wait = e?.status === 429
           ? Math.max(e.retryAfterMs || 0, delays[i] * 2)
           : delays[i];
+        console.warn(`[Retry ${i + 1}/${delays.length}] Attente ${wait}ms avant nouvelle tentative...`);
         await new Promise(r => setTimeout(r, wait));
       }
     }
@@ -63,6 +74,7 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
         || /subscription tier|not available|not found|not supported/i.test(msg);
       const e = new Error(msg);
       e.tierError = tierError;
+      e.status = res.status; // Ajoute le status HTTP pour détection de retry
       throw e;
     }
     const data = await res.json();
@@ -157,10 +169,11 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
+      const apiMsg = err.error?.message || err.message || '';
+
       if (res.status === 429) {
         const headerRetry = parseInt(res.headers.get('retry-after') || '', 10);
         // Groq indique le délai exact dans le message : « try again in 7.7s »
-        const apiMsg = err.error?.message || err.message || '';
         const msgMatch = apiMsg.match(/try again in ([\d.]+)\s*s/i);
         const retryMs = Number.isFinite(headerRetry) && headerRetry > 0
           ? headerRetry * 1000
@@ -176,7 +189,11 @@ async function callOpenAICompatible(url, apiKey, model, prompt, systemInstructio
         if (opts.retry429 === false) e.noRetry = true;
         throw e;
       }
-      throw new Error(err.error?.message || err.message || `Erreur ${label} (${res.status})`);
+
+      // Détecte erreurs serveur (500, 503) et messages de surcharge
+      const e = new Error(apiMsg || `Erreur ${label} (${res.status})`);
+      e.status = res.status;
+      throw e;
     }
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content;
