@@ -781,7 +781,7 @@ async function fetchZoneLandmarks(lat, lng, radiusKm) {
     `);out center 400;`;
   const body = 'data=' + encodeURIComponent(query);
 
-  const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+  const course = () => Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 12000);
     try {
@@ -798,13 +798,23 @@ async function fetchZoneLandmarks(lat, lng, radiusKm) {
     } finally {
       clearTimeout(timer);
     }
-  });
+  }));
 
-  let elements;
-  try {
-    elements = await Promise.any(attempts);
-  } catch {
-    return { stations: [], busStops: [], places: [], markets: [] };
+  // Overpass renvoie régulièrement des 504 passagers (serveurs bénévoles
+  // saturés). Contrairement à fetchRealPOIs, cette requête n'a aucun repli :
+  // sans nouvelle tentative, la fiche de repérage disparaissait du PDF sans
+  // que personne ne comprenne pourquoi.
+  let elements = null;
+  for (let essai = 1; essai <= 3 && !elements; essai++) {
+    try {
+      elements = await course();
+    } catch {
+      console.warn(`[Zone] Overpass muet (tentative ${essai}/3).`);
+      if (essai < 3) await new Promise(r => setTimeout(r, essai * 1500));
+    }
+  }
+  if (!elements) {
+    return { stations: [], busStops: [], places: [], markets: [], indisponible: true };
   }
 
   const groups = { stations: [], busStops: [], places: [], markets: [] };

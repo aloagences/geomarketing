@@ -276,11 +276,22 @@ let _stopCounter = 0;
 // ========================================
 
 /**
+ * Nom de la voie sans son numéro : un secteur couvre toute la rue, afficher
+ * « Secteur 12 Rue de la République » laisserait croire à un point précis.
+ * Gère « 12 », « 12 bis », « 12B ». Si la voie n'est qu'un numéro, on la garde.
+ */
+function streetLabel(address) {
+  const first = (address || '').split(',')[0].trim();
+  const cleaned = first.replace(/^\d+\s*(bis|ter|quater|[a-zA-Z])?\b[\s,-]*/i, '').trim();
+  return cleaned || first;
+}
+
+/**
  * Corps visible d'un arrêt (titre secteur + repères).
  * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
  */
 function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
-  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
+  const street = streetLabel(stop.address) || stop.address || '';
   const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
 
   // Repères visuels : lieu principal + commerces proches détectés dans OSM
@@ -371,7 +382,7 @@ const SM_TYPE_ICONS = {
 
 function renderSmStopHTML(stop) {
   const cfg = SM_TYPE_ICONS[stop.type] || { icon: 'map-pin', color: 'text-cyan-400' };
-  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
+  const street = streetLabel(stop.address) || stop.address || '';
   const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
   return `
     <div class="sm-stop-card flex items-center p-4 bg-white rounded-2xl border border-cyan-200 shadow-sm mb-3">
@@ -610,7 +621,24 @@ function renderZoneLandmarks(groups) {
     block('Arrêts de bus', 'bus', 'sky', groups.busStops, nameLine),
   ].filter(Boolean).join('');
 
+  // Panne Overpass : on le dit à l'écran plutôt que d'escamoter la page sans
+  // explication. `data-pdf-skip` empêche ce message de finir dans le PDF client.
+  if (groups.indisponible) {
+    el.zoneLandmarksGrid.innerHTML = `
+      <div class="md:col-span-2 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+        <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"></i>
+        <div class="text-sm text-amber-900">
+          <p class="font-bold">Fiche de repérage indisponible</p>
+          <p class="mt-1">Les serveurs OpenStreetMap n'ont pas répondu (3 tentatives). Cette page sera absente du PDF. Relancez la génération dans quelques minutes pour l'obtenir.</p>
+        </div>
+      </div>`;
+    el.zoneLandmarks.dataset.pdfSkip = '1';
+    el.zoneLandmarks.classList.remove('hidden');
+    return;
+  }
+
   if (!html) return;
+  delete el.zoneLandmarks.dataset.pdfSkip;
   el.zoneLandmarksGrid.innerHTML = html;
   el.zoneLandmarks.classList.remove('hidden');
 }
@@ -630,7 +658,7 @@ function findLandmarks(stop, pois, max = 2) {
   const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const seen = new Set([norm(stop.locationName)]);
 
-  return pois
+  const candidats = pois
     .filter(p => p.hasProperName && p.name)
     .filter(p => {
       const key = norm(p.name);
@@ -639,10 +667,18 @@ function findLandmarks(stop, pois, max = 2) {
       return true;
     })
     .map(p => ({ p, d: calculateDistance(stop.lat, stop.lng, p.lat, p.lng) }))
-    .filter(x => x.d <= 0.3) // calculateDistance renvoie des km
-    .sort((a, b) => (b.p.publicScore || 1) - (a.p.publicScore || 1) || a.d - b.d)
-    .slice(0, max)
-    .map(x => x.p.name);
+    .filter(x => x.d <= 0.3); // calculateDistance renvoie des km
+
+  const byScore = (a, b) => (b.p.publicScore || 1) - (a.p.publicScore || 1) || a.d - b.d;
+  candidats.sort(byScore);
+
+  // Une boulangerie (ou pâtisserie/opticien) est le repère le plus parlant
+  // pour un chauffeur : enseigne visible, tout le monde la situe. On en
+  // garantit une si elle est à portée, le reste se classe au score.
+  const vitrine = candidats.find(x => x.p._premiumCenter);
+  const retenus = vitrine ? [vitrine, ...candidats.filter(x => x !== vitrine)] : candidats;
+
+  return retenus.slice(0, max).map(x => x.p.name);
 }
 
 // ========================================
@@ -1968,17 +2004,17 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
                <i data-lucide="sunset" class="w-3 h-3"></i> ${sanitize(smTimes.aftStart)} - ${sanitize(smTimes.aftEnd)}
              </span>` : '';
         smSectionHtml = `
-          <div class="mt-6 border-t-2 border-cyan-200 pt-5">
+          <div>
             <div class="flex flex-wrap items-center gap-2 mb-3">
               <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
-              <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
+              <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
               ${smMornBadge}${smAftBadge}
             </div>
             <div class="bg-cyan-50 p-4 rounded-3xl border border-cyan-200">${smStopsHtml}</div>
           </div>`;
       } else if (isSmDay) {
         smSectionHtml = `
-          <div class="mt-6 border-t-2 border-cyan-200 pt-4">
+          <div>
             <div class="flex flex-wrap items-center gap-2">
               <i data-lucide="footprints" class="w-5 h-5 text-cyan-600"></i>
               <span class="text-sm font-extrabold uppercase tracking-widest text-cyan-700">Street Marketing — Équipe Piétonne (${smTeamSize}p) · ${sanitize(smCityRaw)}</span>
@@ -2022,7 +2058,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           </div>`;
         }).join('');
         equestrianSectionHtml = `
-          <div class="mt-6 border-t-2 border-amber-300 pt-5">
+          <div>
             <div class="flex flex-wrap items-center gap-2 mb-3">
               <i data-lucide="rabbit" class="w-5 h-5 text-amber-700"></i>
               <span class="text-sm font-extrabold uppercase tracking-widest text-amber-700">Listing livraison — Centres équestres (${eqStops.length})</span>
@@ -2032,7 +2068,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       } else if (isEquestrianDay) {
         // Jour dédié aux centres équestres mais aucun trouvé : on l'indique
         equestrianSectionHtml = `
-          <div class="mt-6 border-t-2 border-amber-300 pt-5">
+          <div>
             <div class="flex flex-wrap items-center gap-2 mb-3">
               <i data-lucide="rabbit" class="w-5 h-5 text-amber-700"></i>
               <span class="text-sm font-extrabold uppercase tracking-widest text-amber-700">Listing livraison — Centres équestres</span>
@@ -2065,9 +2101,32 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           </div>
           ${weatherAlert}
           <div class="bg-[#F8FAFC] p-4 rounded-3xl">${stopsHtmlArr.join('')}</div>
-          ${smSectionHtml}
-          ${equestrianSectionHtml}
         </div>`;
+
+      // Street Marketing et centres équestres sortent de la carte journalière :
+      // empilés sous les arrêts véhicule, l'ensemble dépassait la hauteur d'une
+      // A4 et était réduit jusqu'à devenir illisible. Chacun a sa propre page.
+      if (smSectionHtml) {
+        plansHtml += `
+          <div id="sm-card-${idx}" class="mb-10 page-break-inside-avoid px-2">
+            <div class="flex flex-col mb-4 pb-3 border-b border-cyan-200">
+              <h4 class="font-extrabold text-3xl text-cyan-900 capitalize mb-1">${sanitize(day.day)}</h4>
+              <span class="text-sm font-bold uppercase text-cyan-600 tracking-widest">Street Marketing — Équipe piétonne</span>
+            </div>
+            ${smSectionHtml}
+          </div>`;
+      }
+
+      if (equestrianSectionHtml) {
+        plansHtml += `
+          <div id="eq-card-${idx}" class="mb-10 page-break-inside-avoid px-2">
+            <div class="flex flex-col mb-4 pb-3 border-b border-amber-300">
+              <h4 class="font-extrabold text-3xl text-amber-900 capitalize mb-1">${sanitize(day.day)}</h4>
+              <span class="text-sm font-bold uppercase text-amber-600 tracking-widest">Livraison centres équestres</span>
+            </div>
+            ${equestrianSectionHtml}
+          </div>`;
+      }
     }
 
     el.dailyPlansContainer.innerHTML = plansHtml;

@@ -31,6 +31,7 @@ async function generateFullPDF(data, inputRefs) {
     const captureElement = async (elementId, isBlue = false) => {
       const el = document.getElementById(elementId);
       if (!el || el.classList.contains('hidden')) return;
+      if (el.dataset.pdfSkip) return; // message d'erreur écran, pas pour le client
 
       const saved = { borderRadius: el.style.borderRadius, border: el.style.border, margin: el.style.margin };
       el.style.borderRadius = '0px';
@@ -93,10 +94,13 @@ async function generateFullPDF(data, inputRefs) {
     // 3bis. Fiche de repérage (lieux importants de la zone)
     await captureElement('zoneLandmarksContainer', false);
 
-    // 4. Itinéraires
+    // 4. Itinéraires. Street Marketing et centres équestres ont chacun leur
+    //    page : trop denses pour tenir lisiblement sous les arrêts véhicule.
     if (data?.dailyPlans) {
       for (let i = 0; i < data.dailyPlans.length; i++) {
         await captureElement(`day-card-${i}`, false);
+        await captureElement(`sm-card-${i}`, false);
+        await captureElement(`eq-card-${i}`, false);
       }
     }
 
