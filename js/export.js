@@ -90,6 +90,9 @@ async function generateFullPDF(data, inputRefs) {
     await captureElement('mapContainerWrapper', false);
     if (mapHeader) mapHeader.style.display = savedDisplay;
 
+    // 3bis. Fiche de repérage (lieux importants de la zone)
+    await captureElement('zoneLandmarksContainer', false);
+
     // 4. Itinéraires
     if (data?.dailyPlans) {
       for (let i = 0; i < data.dailyPlans.length; i++) {

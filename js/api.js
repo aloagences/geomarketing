@@ -559,7 +559,7 @@ function buildEssentialQuery(lat, lng, radiusMeters) {
     `node["highway"="bus_stop"](around:${radiusMeters},${lat},${lng});` +
     `node["railway"~"station|tram_stop|halt"](around:${radiusMeters},${lat},${lng});` +
     `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|supermarket|marketplace|hospital|clinic"](around:${radiusMeters},${lat},${lng});` +
-    `node["shop"~"bakery|pharmacy|supermarket|convenience|butcher|newsagent|hairdresser|optician|florist|tabacco|pastry|greengrocer|deli"](around:${radiusMeters},${lat},${lng});` +
+    `node["shop"~"bakery|pharmacy|supermarket|convenience|butcher|newsagent|hairdresser|optician|florist|tobacco|pastry|greengrocer|deli"](around:${radiusMeters},${lat},${lng});` +
     `);out 600;`;
 }
 
@@ -623,7 +623,10 @@ async function fetchPOIsNominatim(lat, lng, radiusKm) {
   return results;
 }
 
-async function fetchRealPOIs(lat, lng, radiusKm) {
+// minPois = nombre de lieux réellement nécessaires pour couvrir la campagne.
+// En dessous, on continue d'interroger Overpass (requête complète incluse) :
+// un pool trop maigre force l'échelle de repli à inventer des arrêts.
+async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
   const r4km   = Math.min(4000,            radiusKm * 1000);
   const rFull  = radiusKm * 1000;
   const rWide  = Math.min(radiusKm * 2000, 40000); // plafonner à 40km
@@ -673,25 +676,31 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
 
   let pool = [];
 
+  const done = (p) => { console.log(`[POI] pool final: ${p.length} lieux (besoin: ${minPois})`); return p; };
+
   // Étape 1 : requête rapide essentielle à 4km (toujours dans le rayon)
   const r1 = await tryOverpass(buildEssentialQuery, r4km);
   if (r1) pool = dedupe([...pool, ...r1]);
-  if (withinRadius(pool).length >= 8) return withinRadius(pool);
+  if (withinRadius(pool).length >= minPois) return done(withinRadius(pool));
 
   // Étape 2 : requête rapide essentielle au rayon complet
   if (rFull > r4km) {
     const r2 = await tryOverpass(buildEssentialQuery, rFull);
     if (r2) pool = dedupe([...pool, ...r2]);
-    if (withinRadius(pool).length >= 8) return withinRadius(pool);
+    if (withinRadius(pool).length >= minPois) return done(withinRadius(pool));
   }
 
   // Étape 3 : requête complète (nodes + ways) au rayon complet
   const r3 = await tryOverpass(buildFullQuery, rFull);
   if (r3) pool = dedupe([...pool, ...r3]);
 
-  // Assez de lieux DANS le rayon → on s'y tient strictement (rayon respecté)
+  // Assez de lieux DANS le rayon → on s'y tient strictement (rayon respecté).
+  // Élargir n'apporterait que des lieux HORS rayon : inutile ici, on s'arrête.
   const inRadius = withinRadius(pool);
-  if (inRadius.length >= 3) return inRadius;
+  if (inRadius.length >= 3) {
+    if (inRadius.length < minPois) console.warn(`[POI] pool maigre : ${inRadius.length} lieux pour un besoin de ${minPois}`);
+    return done(inRadius);
+  }
 
   // --- ÉLARGISSEMENT : uniquement si trop peu de lieux dans le rayon ---
   // Étape 4 : requête complète élargie (jusqu'à radius×2, plafonné 40km)
@@ -708,7 +717,141 @@ async function fetchRealPOIs(lat, lng, radiusKm) {
 
   // Préférer les lieux dans le rayon ; n'élargir que si le rayon est réellement vide
   const inRadius2 = withinRadius(pool);
-  return inRadius2.length >= 3 ? inRadius2 : pool;
+  return done(inRadius2.length >= 3 ? inRadius2 : pool);
+}
+
+/**
+ * Récupère les centres de peuplement (villes, bourgs, villages, quartiers).
+ * Sert à mesurer si un POI est dans un lieu de vie ou isolé en rase campagne.
+ * Requête très légère : quelques dizaines de nœuds au maximum.
+ */
+async function fetchPlaceNodes(lat, lng, radiusKm) {
+  const rM = Math.min(radiusKm * 1000, 40000);
+  const query = `[out:json][timeout:20];(` +
+    `node["place"~"^(city|town|village|suburb|neighbourhood|hamlet)$"](around:${rM},${lat},${lng});` +
+    `);out 200;`;
+  const body = 'data=' + encodeURIComponent(query);
+
+  const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('bad status');
+      const data = JSON.parse(await res.text());
+      if (!data.elements) throw new Error('no elements');
+      return data.elements
+        .filter(e => e.lat && e.lon)
+        .map(e => ({ lat: e.lat, lng: e.lon, place: e.tags?.place, name: e.tags?.name || '' }));
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  try {
+    const places = await Promise.any(attempts);
+    console.log(`[POI] ${places.length} centres de peuplement détectés.`);
+    return places;
+  } catch {
+    return []; // non bloquant : le bonus de score sera simplement absent
+  }
+}
+
+/**
+ * Lieux structurants de la zone, pour la fiche de repérage du chauffeur :
+ * gares, arrêts de bus, places et rues piétonnes, marchés.
+ * Requête et parseur dédiés : `place=square` et `highway=pedestrian` ne sont
+ * dans aucune autre requête, et parsePOI rejette les voies sans nom.
+ */
+async function fetchZoneLandmarks(lat, lng, radiusKm) {
+  const rM = Math.min(radiusKm * 1000, 40000);
+  const query = `[out:json][timeout:30];(` +
+    `node["railway"~"^(station|halt|tram_stop)$"](around:${rM},${lat},${lng});` +
+    `node["highway"="bus_stop"](around:${rM},${lat},${lng});` +
+    `node["amenity"="marketplace"](around:${rM},${lat},${lng});` +
+    `way["amenity"="marketplace"](around:${rM},${lat},${lng});` +
+    `node["place"="square"](around:${rM},${lat},${lng});` +
+    `way["place"="square"](around:${rM},${lat},${lng});` +
+    `way["highway"="pedestrian"]["name"](around:${rM},${lat},${lng});` +
+    `);out center 400;`;
+  const body = 'data=' + encodeURIComponent(query);
+
+  const attempts = OVERPASS_ENDPOINTS.map(async (endpoint) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('bad status');
+      const data = JSON.parse(await res.text());
+      if (!data.elements) throw new Error('no elements');
+      return data.elements;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  let elements;
+  try {
+    elements = await Promise.any(attempts);
+  } catch {
+    return { stations: [], busStops: [], places: [], markets: [] };
+  }
+
+  const groups = { stations: [], busStops: [], places: [], markets: [] };
+  const seen = new Set();
+
+  for (const e of elements) {
+    const tags = e.tags || {};
+    const name = tags.name;
+    if (!name) continue; // sans nom, inexploitable sur le terrain
+
+    const clat = e.lat ?? e.center?.lat;
+    const clng = e.lon ?? e.center?.lon;
+    if (!clat || !clng) continue;
+
+    const dist = calculateDistance(lat, lng, clat, clng);
+    if (dist > radiusKm) continue;
+
+    const key = `${name}|${Math.round(clat * 1000)}|${Math.round(clng * 1000)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const city = tags['addr:city'] || '';
+    const item = { name, city, lat: clat, lng: clng, distance: dist.toFixed(1) };
+
+    if (tags.railway) {
+      item.kind = tags.railway === 'tram_stop' ? 'Tram' : 'Gare';
+      groups.stations.push(item);
+    } else if (tags.highway === 'bus_stop') {
+      groups.busStops.push(item);
+    } else if (tags.amenity === 'marketplace') {
+      const days = parseMarketDays(tags.opening_hours);
+      item.days = days.length ? days : ['mercredi', 'samedi'];
+      item.hours = tags.opening_hours || '';
+      groups.markets.push(item);
+    } else {
+      item.kind = tags.place === 'square' ? 'Place' : 'Rue piétonne';
+      groups.places.push(item);
+    }
+  }
+
+  // Les plus proches de l'origine d'abord : ce sont les plus utiles
+  for (const k of Object.keys(groups)) {
+    groups[k].sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+  }
+
+  console.log(`[Zone] ${groups.stations.length} gares, ${groups.busStops.length} arrêts, ${groups.places.length} places/rues, ${groups.markets.length} marchés.`);
+  return groups;
 }
 
 // ========================================
@@ -924,6 +1067,22 @@ function parseMarketDays(openingHours) {
   return days;
 }
 
+// Valeurs de types SANS accueil du public (on filtre par VALEUR, pas par clé :
+// office=government ou craft=bakery reçoivent du public et doivent être gardés).
+const NON_PUBLIC_OFFICE = new Set([
+  'company', 'it', 'lawyer', 'insurance', 'estate_agent',
+  'accountant', 'logistics', 'research', 'telecommunication',
+]);
+const NON_PUBLIC_CRAFT = new Set([
+  'carpenter', 'electrician', 'plumber', 'roofer',
+  'metal_construction', 'scaffolder', 'painter', 'stonemason',
+]);
+const NON_PUBLIC_BUILDING = new Set(['warehouse', 'industrial']);
+
+// Préfixes OSM de cycle de vie : l'objet n'est plus en activité.
+// Meilleur signal disponible contre les "entreprises qui n'existent plus".
+const LIFECYCLE_PREFIXES = ['disused:', 'was:', 'abandoned:', 'removed:', 'demolished:'];
+
 function parsePOI(e, originLat, originLng) {
   const tags = e.tags || {};
 
@@ -931,6 +1090,15 @@ function parsePOI(e, originLat, originLng) {
   if (BLACKLISTED_SHOP_TYPES.has(tags.shop)) return null;
   if (tags.amenity === 'parking' || tags.amenity === 'fuel') return null;
   if (tags.landuse || tags.industrial) return null;
+
+  // Lieu fermé / désaffecté → ne jamais l'envoyer à un chauffeur
+  if (tags.disused || tags.abandoned) return null;
+  if (Object.keys(tags).some(k => LIFECYCLE_PREFIXES.some(p => k.startsWith(p)))) return null;
+
+  // Types sans accueil du public (bureaux, artisans du bâtiment, entrepôts)
+  if (NON_PUBLIC_OFFICE.has(tags.office)) return null;
+  if (NON_PUBLIC_CRAFT.has(tags.craft)) return null;
+  if (NON_PUBLIC_BUILDING.has(tags.building)) return null;
 
   // Générer un nom depuis le type si pas de nom propre
   let name = tags.name || tags.brand;
@@ -1009,6 +1177,16 @@ function parsePOI(e, originLat, originLng) {
     || tags.shop === 'pastry' || tags.amenity === 'bakery';
   const reliability = isPremiumCenter ? 8 : (POI_RELIABILITY[type] || 1);
 
+  // publicScore : à quel point ce lieu est un point de vie fiable et vérifiable.
+  // Un objet richement tagué a été relevé sur le terrain → il existe vraiment.
+  let publicScore = reliability;
+  if (hasProperName) publicScore += 2;
+  if (tags['addr:housenumber']) publicScore += 2;
+  if (tags.opening_hours) publicScore += 1;
+  if (tags.website || tags.phone || tags['contact:phone']) publicScore += 1;
+  const checkDate = tags.check_date || tags['survey:date'];
+  if (checkDate && /^20(2[0-9]|[3-9][0-9])/.test(checkDate)) publicScore += 1;
+
   return {
     name,
     lat: clat,
@@ -1016,6 +1194,8 @@ function parsePOI(e, originLat, originLng) {
     type,
     address,
     reliability,
+    publicScore,
+    hasProperName,
     _premiumCenter: isPremiumCenter,
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
     hours: openingHours,

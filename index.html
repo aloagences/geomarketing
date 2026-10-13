@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.7 — 29 septembre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.8 — 13 octobre 2026</span>
       </div>
     </header>
 
@@ -520,6 +520,17 @@
           <div id="leafletMap" class="w-full h-[600px] z-0 bg-gray-100"></div>
         </div>
 
+        <!-- Lieux importants de la zone (repérage chauffeur) -->
+        <div id="zoneLandmarksContainer" class="card overflow-hidden mt-8 hidden border-0 shadow-lg bg-white">
+          <div class="bg-[#0E2C59] text-white px-8 py-4">
+            <span class="text-xs text-blue-300 font-semibold uppercase tracking-wider mb-1 block">Fiche de repérage</span>
+            <h3 class="font-bold text-xl flex items-center">
+              <i data-lucide="landmark" class="w-5 h-5 mr-2 text-white"></i> Lieux importants de la zone
+            </h3>
+          </div>
+          <div id="zoneLandmarksGrid" class="p-6 md:p-8 grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </div>
+
         <!-- Stratégie IA -->
         <div id="clientAnalysisOutput" class="card p-6 md:p-8 hidden relative group hide-on-print">
           <div class="flex justify-between items-center mb-4 border-b pb-2">
@@ -569,10 +580,10 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.7"></script>
-  <script src="js/api.js?v=5.7"></script>
-  <script src="js/map.js?v=5.7"></script>
-  <script src="js/export.js?v=5.7"></script>
-  <script src="js/app.js?v=5.7"></script>
+  <script src="js/utils.js?v=5.8"></script>
+  <script src="js/api.js?v=5.8"></script>
+  <script src="js/map.js?v=5.8"></script>
+  <script src="js/export.js?v=5.8"></script>
+  <script src="js/app.js?v=5.8"></script>
 </body>
 </html>

@@ -34,6 +34,8 @@ function initDomRefs() {
   el.displayBrand = document.getElementById('displayBrand');
   el.dateSpan = document.getElementById('generationDate');
   el.mapContainer = document.getElementById('mapContainerWrapper');
+  el.zoneLandmarks = document.getElementById('zoneLandmarksContainer');
+  el.zoneLandmarksGrid = document.getElementById('zoneLandmarksGrid');
   el.mapStats = document.getElementById('mapStats');
   el.officialBadges = document.getElementById('officialBadges');
   el.badgeSiren = document.getElementById('badgeSiren');
@@ -273,44 +275,59 @@ let _stopCounter = 0;
 // RENDU HTML SÉCURISÉ D'UN ARRÊT
 // ========================================
 
+/**
+ * Corps visible d'un arrêt (titre secteur + repères).
+ * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
+ */
+function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
+  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
+  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+
+  // Repères visuels : lieu principal + commerces proches détectés dans OSM
+  const marks = [stop.locationName, ...(stop.landmarks || [])].filter(Boolean);
+  const marksHtml = marks.map(m => `<span class="font-medium text-gray-700">${sanitize(m)}</span>`).join('<span class="text-gray-300">·</span>');
+
+  return `
+    <div class="flex items-center flex-wrap gap-2">
+      ${getTypeIconHTML(stop.type)}
+      <span class="font-extrabold text-gray-900 text-lg">Secteur ${sanitize(street)}</span>
+      ${distBadge}
+      <button onclick="editStop('${stopId}')"
+        class="ml-auto text-gray-300 hover:text-blue-500 transition-colors p-1 rounded"
+        title="Modifier cet arrêt">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="text-sm text-gray-500 mt-1.5 flex items-center flex-wrap gap-x-2">
+      <span class="text-gray-400 text-xs">Repères :</span>
+      ${marksHtml}
+      ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
+      <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">
+        SRC: ${sanitize(srcLabel)}
+      </span>
+    </div>`;
+}
+
 function renderStopHTML(stop, distBadge) {
   const stopId = `stop_${_stopCounter++}`;
   stopRegistry[stopId] = { ...stop };
 
-  // Adresse en gras (repère principal), nom du commerce en secondaire
-  const street = stop.address?.split(',')[0]?.trim() || stop.address || '';
-  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+  // Plage de secteur : « 10:00 - 10:45 » (45 min de présence, 15 min de trajet)
+  const timeLabel = stop.timeEnd
+    ? `${sanitize(stop.time)}<span class="block text-sm text-gray-400 font-bold">${sanitize(stop.timeEnd)}</span>`
+    : sanitize(stop.time);
 
   return `
     <div class="stop-card flex items-center p-5 bg-white rounded-2xl border border-gray-200 shadow-sm mb-4" data-stop-id="${stopId}">
-      <div class="w-20 font-extrabold text-2xl text-[#0E2C59] tracking-tight flex-shrink-0">${sanitize(stop.time)}</div>
+      <div class="w-24 font-extrabold text-2xl text-[#0E2C59] tracking-tight flex-shrink-0 leading-tight">${timeLabel}</div>
       <div class="flex-1 min-w-0 border-l-2 border-gray-100 pl-5">
 
         <!-- Vue normale -->
-        <div class="stop-view">
-          <div class="flex items-center flex-wrap gap-2">
-            ${getTypeIconHTML(stop.type)}
-            <span class="font-extrabold text-gray-900 text-lg">${sanitize(street)}</span>
-            ${distBadge}
-            <button onclick="editStop('${stopId}')"
-              class="ml-auto text-gray-300 hover:text-blue-500 transition-colors p-1 rounded"
-              title="Modifier cet arrêt">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="2.5">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-          </div>
-          <div class="text-sm text-gray-500 mt-1.5 flex items-center flex-wrap gap-x-2">
-            <span class="text-gray-400 text-xs">Repère visuel :</span>
-            <span class="font-medium text-gray-700">${sanitize(stop.locationName)}</span>
-            ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
-            <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">
-              SRC: ${sanitize(stop.source)}
-            </span>
-          </div>
-        </div>
+        <div class="stop-view">${renderStopBodyHTML(stop, stopId, distBadge, stop.source)}</div>
 
         <!-- Mode édition (caché par défaut) -->
         <div class="stop-edit hidden">
@@ -421,31 +438,9 @@ async function saveStop(stopId) {
       distBadge  = `<span class="${cls} font-bold text-sm ml-1">✓ ${dist.toFixed(1)}km</span>`;
     }
 
-    const street = stop.address.split(',')[0]?.trim() || stop.address;
-    const city   = stop.address.split(',').slice(1).join(',').trim() || '';
-
     const viewDiv = card?.querySelector('.stop-view');
     if (viewDiv) {
-      viewDiv.innerHTML = `
-        <div class="flex items-center flex-wrap gap-2">
-          ${getTypeIconHTML(stop.type)}
-          <span class="font-extrabold text-gray-900 text-lg">${sanitize(street)}</span>
-          ${distBadge}
-          <button onclick="editStop('${stopId}')"
-            class="ml-auto text-gray-300 hover:text-blue-500 transition-colors p-1 rounded">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
-          </button>
-        </div>
-        <div class="text-sm text-gray-500 mt-1.5 flex items-center flex-wrap gap-x-2">
-          <span class="text-gray-400 text-xs">Repère visuel :</span>
-          <span class="font-medium text-gray-700">${sanitize(stop.locationName)}</span>
-          ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
-          <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">SRC: MANUEL</span>
-        </div>`;
+      viewDiv.innerHTML = renderStopBodyHTML(stop, stopId, distBadge, 'MANUEL');
     }
 
     cancelEditStop(stopId);
@@ -564,6 +559,196 @@ function extractISOFromFrDate(str) {
 }
 
 // ========================================
+// FICHE DE REPÉRAGE — LIEUX IMPORTANTS DE LA ZONE
+// ========================================
+
+/**
+ * Rend les lieux structurants de la zone en 4 groupes.
+ * Plafonné à 8 entrées par groupe pour rester lisible une fois exporté en PDF.
+ */
+function renderZoneLandmarks(groups) {
+  const MAX = 8;
+
+  // Classes Tailwind écrites en entier : le JIT du CDN ne génère que les
+  // classes qu'il trouve sous forme de chaîne littérale complète.
+  const THEMES = {
+    indigo:  { badge: 'text-indigo-700 bg-indigo-50',   icon: 'text-indigo-600',  title: 'text-indigo-700' },
+    emerald: { badge: 'text-emerald-700 bg-emerald-50', icon: 'text-emerald-600', title: 'text-emerald-700' },
+    amber:   { badge: 'text-amber-700 bg-amber-50',     icon: 'text-amber-600',   title: 'text-amber-700' },
+    sky:     { badge: 'text-sky-700 bg-sky-50',         icon: 'text-sky-600',     title: 'text-sky-700' },
+  };
+
+  const block = (title, icon, color, items, lineFn) => {
+    if (!items.length) return '';
+    const th = THEMES[color];
+    const rows = items.slice(0, MAX).map(it => `
+      <div class="flex items-start gap-2 py-1.5 border-b border-gray-100 last:border-0">
+        <span class="text-xs font-bold ${th.badge} rounded px-1.5 py-0.5 flex-shrink-0 mt-0.5">${sanitize(it.distance)}km</span>
+        <div class="min-w-0 text-sm">${lineFn(it)}</div>
+      </div>`).join('');
+    const more = items.length > MAX
+      ? `<p class="text-xs text-gray-400 italic mt-2">+ ${items.length - MAX} autre(s) dans la zone</p>` : '';
+    return `
+      <div>
+        <div class="flex items-center gap-2 mb-2">
+          <i data-lucide="${icon}" class="w-4 h-4 ${th.icon}"></i>
+          <span class="text-sm font-extrabold uppercase tracking-widest ${th.title}">${title} (${items.length})</span>
+        </div>
+        <div class="bg-gray-50 rounded-2xl px-4 py-2 border border-gray-200">${rows}${more}</div>
+      </div>`;
+  };
+
+  const nameLine = (it) => `<span class="font-bold text-gray-900">${sanitize(it.name)}</span>`
+    + (it.kind ? `<span class="text-gray-400 text-xs ml-1.5">${sanitize(it.kind)}</span>` : '')
+    + (it.city ? `<span class="text-gray-400 text-xs ml-1.5">${sanitize(it.city)}</span>` : '');
+
+  const html = [
+    block('Gares & stations', 'train-front', 'indigo', groups.stations, nameLine),
+    block('Marchés', 'shopping-basket', 'emerald', groups.markets, (it) =>
+      `${nameLine(it)}<div class="text-xs text-emerald-700 font-semibold capitalize mt-0.5">${sanitize(it.days.join(', '))}${it.hours ? ` · ${sanitize(it.hours)}` : ''}</div>`),
+    block('Places & rues importantes', 'map-pin', 'amber', groups.places, nameLine),
+    block('Arrêts de bus', 'bus', 'sky', groups.busStops, nameLine),
+  ].filter(Boolean).join('');
+
+  if (!html) return;
+  el.zoneLandmarksGrid.innerHTML = html;
+  el.zoneLandmarks.classList.remove('hidden');
+}
+
+// ========================================
+// REPÈRES VISUELS D'UN SECTEUR
+// ========================================
+
+/**
+ * Les 2 lieux les plus identifiables à moins de 300 m de l'arrêt.
+ * Donne au chauffeur de quoi se repérer sans GPS.
+ * Exige un nom propre : « Pharmacie (Villeneuve) », nom généré faute de tag
+ * OSM `name`, serait inutilisable sur le terrain.
+ */
+function findLandmarks(stop, pois, max = 2) {
+  if (!stop?.lat || !stop?.lng) return [];
+  const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const seen = new Set([norm(stop.locationName)]);
+
+  return pois
+    .filter(p => p.hasProperName && p.name)
+    .filter(p => {
+      const key = norm(p.name);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map(p => ({ p, d: calculateDistance(stop.lat, stop.lng, p.lat, p.lng) }))
+    .filter(x => x.d <= 0.3) // calculateDistance renvoie des km
+    .sort((a, b) => (b.p.publicScore || 1) - (a.p.publicScore || 1) || a.d - b.d)
+    .slice(0, max)
+    .map(x => x.p.name);
+}
+
+// ========================================
+// DÉCOUPAGE EN SECTEURS (présence + trajet)
+// ========================================
+
+// Le chauffeur reste 45 min sur un secteur, puis dispose de 15 min de trajet.
+const PRESENCE_MIN = 45;
+const TRAVEL_MIN   = 15;
+const CYCLE_MIN    = PRESENCE_MIN + TRAVEL_MIN; // 60 min
+
+const _toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+const _toStr = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+/**
+ * Nombre de secteurs tenant dans une plage horaire.
+ * Ex. 10:00-13:00 → 3 secteurs (10:00-10:45, 11:00-11:45, 12:00-12:45).
+ */
+function sectorCount(startTime, endTime) {
+  const dur = _toMin(endTime) - _toMin(startTime);
+  if (dur <= 0) return 0;
+  return Math.max(1, Math.round((dur - TRAVEL_MIN) / CYCLE_MIN));
+}
+
+/**
+ * Construit n plages [{start, end}] dans la fenêtre donnée.
+ * Si n dépasse ce que la fenêtre permet, les plages sont comprimées
+ * plutôt que de déborder (cas du jour de livraison des centres équestres).
+ */
+function buildCycles(startTime, endTime, n) {
+  const startMin = _toMin(startTime);
+  const endMin   = _toMin(endTime);
+  const dur = endMin - startMin;
+  if (dur <= 0 || n <= 0) return [];
+
+  const cycle    = Math.min(CYCLE_MIN, Math.floor(dur / n));
+  const presence = Math.max(15, Math.min(PRESENCE_MIN, cycle - TRAVEL_MIN));
+
+  return Array.from({ length: n }, (_, i) => {
+    const s = startMin + i * cycle;
+    return { start: _toStr(s), end: _toStr(Math.min(s + presence, endMin)) };
+  });
+}
+
+/**
+ * Passe finale : affecte à chaque arrêt sa plage de secteur (time + timeEnd).
+ * Exécutée en TOUT DERNIER, une fois le nombre d'arrêts définitivement figé.
+ * `stop.time` reste l'heure de début canonique utilisée par le reste du code.
+ * Les arrêts école gardent leur horaire imposé et consomment le secteur qui
+ * les contient, au lieu de décaler toute la grille.
+ */
+function applySectorTimes(dailyPlans, perDayTimes) {
+  dailyPlans.forEach((day, idx) => {
+    const t = perDayTimes[idx];
+    if (!t || !day.stops?.length) return;
+
+    const split = 14 * 60;
+    const morning   = day.stops.filter(s => _toMin(s.time) < split);
+    const afternoon = day.stops.filter(s => _toMin(s.time) >= split);
+
+    const assign = (arr, startTime, endTime) => {
+      if (arr.length === 0) return;
+      const cycles = buildCycles(startTime, endTime, arr.length);
+      if (cycles.length === 0) return;
+
+      // Les horaires imposés (école) réservent le secteur le plus proche
+      const taken = new Set();
+      arr.forEach(s => {
+        if (s.type !== 'school') return;
+        const target = _toMin(s.time);
+        let best = -1, bestDist = Infinity;
+        cycles.forEach((c, i) => {
+          if (taken.has(i)) return;
+          const d = Math.abs(_toMin(c.start) - target);
+          if (d < bestDist) { bestDist = d; best = i; }
+        });
+        if (best !== -1) {
+          taken.add(best);
+          // L'école garde son heure réelle de sortie, la fin suit le secteur
+          s.timeEnd = cycles[best].end;
+          s._sector = _toMin(cycles[best].start);
+        }
+      });
+
+      // Les autres arrêts prennent les secteurs restants, dans l'ordre
+      const free = cycles.map((_, i) => i).filter(i => !taken.has(i));
+      let fi = 0;
+      arr.forEach(s => {
+        if (s.type === 'school' && s._sector !== undefined) return;
+        const c = cycles[free[fi++]] || cycles[cycles.length - 1];
+        s.time = c.start;
+        s.timeEnd = c.end;
+        s._sector = _toMin(c.start);
+      });
+
+      arr.sort((a, b) => (a._sector ?? _toMin(a.time)) - (b._sector ?? _toMin(b.time)));
+    };
+
+    assign(morning,   t.mornStart, t.mornEnd);
+    assign(afternoon, t.aftStart,  t.aftEnd);
+
+    day.stops = [...morning, ...afternoon];
+  });
+}
+
+// ========================================
 // REDISTRIBUTION DES ARRÊTS SUR UNE PLAGE
 // ========================================
 
@@ -613,7 +798,7 @@ async function handleGenerate() {
     setProgress('Initialisation...', 5);
 
     // Reset UI
-    ['mapContainer', 'planCard', 'attendanceCard', 'reachEstimationContainer',
+    ['mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard', 'reachEstimationContainer',
      'officialBadges', 'badgeSiren', 'badgeInsee', 'badgePop', 'analysisCard'
     ].forEach(id => el[id]?.classList.add('hidden'));
 
@@ -689,7 +874,10 @@ async function handleGenerate() {
     // --- POIs OSM ---
     const radius = parseFloat(inputRefs.radius.value) || 10;
     setProgress(`Scan topographique à ${radius}km...`, 45);
-    const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius);
+    // Besoin réel : ~8 arrêts/jour, marge 1.5, chaque POI réutilisable 2 fois.
+    // Sous ce seuil, l'échelle de repli s'épuise et invente des arrêts.
+    const minPois = Math.max(30, Math.ceil(duration * 8 * 1.5 / 2));
+    const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius, minPois);
     const targetCity = originObj.city || inputRefs.address.value.split(',')[0].trim();
 
     console.log(`[POI] ${realPOIsRaw.length} points d'intérêt trouvés dans la zone (rayon ${radius}km).`);
@@ -892,6 +1080,44 @@ async function handleGenerate() {
       }
     }
 
+    // --- Bonus "lieu de vie" : proximité d'un centre de peuplement ---
+    // Un POI à moins de 800 m d'un bourg/village/quartier est un lieu fréquenté.
+    // Mesure directe, contrairement au comptage de voisins qui ne refléterait
+    // que la composition de notre propre requête Overpass.
+    // Les lieux structurants de la zone sont récupérés en parallèle : requête
+    // indépendante, inutile d'ajouter sa latence à celle des centres de peuplement.
+    const [placeNodes, zoneLandmarks] = await Promise.all([
+      fetchPlaceNodes(originObj.lat, originObj.lng, radius),
+      fetchZoneLandmarks(originObj.lat, originObj.lng, radius),
+    ]);
+    if (placeNodes.length > 0) {
+      for (const poi of filteredPOIs) {
+        const nearPlace = placeNodes.some(pl =>
+          calculateDistance(poi.lat, poi.lng, pl.lat, pl.lng) <= 0.8
+        );
+        if (nearPlace) poi.publicScore = (poi.publicScore || 1) + 3;
+        else poi._isolated = true;
+      }
+    }
+
+    // --- Filtrage strict des lieux isolés, avec repli automatique ---
+    // Les transports, marchés et écoles restent valables même isolés
+    // (une gare de campagne reste un point de passage public).
+    const ALWAYS_KEEP = ['transport', 'market', 'school'];
+    const strictPOIs = filteredPOIs.filter(p => !p._isolated || ALWAYS_KEEP.includes(p.type));
+    if (strictPOIs.length >= minPois) {
+      console.log(`[POI] Filtrage strict : ${filteredPOIs.length} → ${strictPOIs.length} lieux de vie.`);
+      filteredPOIs = strictPOIs;
+    } else if (strictPOIs.length < filteredPOIs.length) {
+      // Repli : réintégrer les meilleurs isolés jusqu'à couvrir le besoin
+      const rejected = filteredPOIs
+        .filter(p => p._isolated && !ALWAYS_KEEP.includes(p.type))
+        .sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
+      const reinstated = rejected.slice(0, Math.max(0, minPois - strictPOIs.length));
+      console.log(`[POI] Filtrage assoupli : ${strictPOIs.length} lieux de vie + ${reinstated.length} réintégrés (besoin ${minPois}).`);
+      filteredPOIs = [...strictPOIs, ...reinstated];
+    }
+
     // --- Tri POIs : prioritaires d'abord, puis marchés, puis local, puis distance ---
     filteredPOIs.sort((a, b) => {
       const aPriority = inPriorityZone(a.name, a.address, a.lat, a.lng, a._priorityZone);
@@ -1055,8 +1281,8 @@ STRATÉGIE CARDINALE: Attribue à chaque jour une direction dominante (Nord, Sud
 PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
 REPÈRES PREMIUM: Les opticiens et boulangeries occupent les meilleurs emplacements en cœur de ville — privilégie-les comme points d'ancrage centraux quand ils figurent dans la BASE OSM.
 JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une par jour, dans l'ordre chronologique. Même les jours sans créneau doivent avoir une entrée avec "stops":[] vide.
-HORAIRES: EXACTEMENT 4 arrêts par créneau actif. ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
-RÉPARTITION HORAIRE: Les 4 arrêts doivent être RÉPARTIS sur TOUTE la plage horaire du créneau. Par ex. pour 10:00-13:00 → arrêts vers 10:00, 10:45, 11:30, 12:15. Pour 14:00-17:00 → arrêts vers 14:00, 15:00, 16:00, 16:45. Ne PAS concentrer tous les arrêts au début.
+HORAIRES: environ 1 arrêt par heure de créneau actif (ex. 10:00-13:00 → 3 arrêts). ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
+SECTEURS: chaque arrêt est un SECTEUR où le véhicule stationne 45 minutes. Choisis des lieux de VIE très fréquentés et visibles depuis la rue : commerces de centre-ville, arrêts de bus, gares, places et marchés. JAMAIS de zone d'activité, d'entrepôt ni de lieu isolé en rase campagne. Les horaires exacts sont recalculés automatiquement : donne un ordre de passage cohérent géographiquement, sans te soucier des minutes.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
 MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00. Ne jamais placer un marché un mardi, lundi, jeudi ou vendredi.
 CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient entre 12h00 et 14h00 les mercredis après-midi et samedis après-midi (pic d'affluence pause déjeuner et week-end).
@@ -1126,7 +1352,6 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // Maintenant l'index est fiable (1:1 avec perDayTimes).
     // Si l'IA n'a pas fourni assez d'arrêts, on crée des placeholders
     // que la validation topographique remplira avec de vrais POIs.
-    const STOPS_PER_SLOT = 4;
     const makePlaceholder = () => ({
       time: '00:00', locationName: '', address: '', type: 'other',
       source: '', lat: 0, lng: 0,
@@ -1138,24 +1363,26 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       dayPlan.stops = dayPlan.stops || [];
 
       const allStops = dayPlan.stops;
+      // Nombre d'arrêts = nombre de secteurs tenant réellement dans la plage
+      const nMorn = t.hasMorning   ? sectorCount(t.mornStart, t.mornEnd) : 0;
+      const nAft  = t.hasAfternoon ? sectorCount(t.aftStart,  t.aftEnd)  : 0;
 
-      if (t.hasMorning && t.hasAfternoon) {
-        const needed = STOPS_PER_SLOT * 2;
-        // Compléter si pas assez d'arrêts
+      if (nMorn && nAft) {
+        const needed = nMorn + nAft;
         while (allStops.length < needed) allStops.push(makePlaceholder());
-        const mornStops = allStops.slice(0, STOPS_PER_SLOT);
-        const aftStops = allStops.slice(STOPS_PER_SLOT, needed);
+        const mornStops = allStops.slice(0, nMorn);
+        const aftStops = allStops.slice(nMorn, needed);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
         redistributeStops(aftStops, t.aftStart, t.aftEnd);
         dayPlan.stops = [...mornStops, ...aftStops];
-      } else if (t.hasMorning) {
-        while (allStops.length < STOPS_PER_SLOT) allStops.push(makePlaceholder());
-        const mornStops = allStops.slice(0, STOPS_PER_SLOT);
+      } else if (nMorn) {
+        while (allStops.length < nMorn) allStops.push(makePlaceholder());
+        const mornStops = allStops.slice(0, nMorn);
         redistributeStops(mornStops, t.mornStart, t.mornEnd);
         dayPlan.stops = mornStops;
-      } else if (t.hasAfternoon) {
-        while (allStops.length < STOPS_PER_SLOT) allStops.push(makePlaceholder());
-        const aftStops = allStops.slice(0, STOPS_PER_SLOT);
+      } else if (nAft) {
+        while (allStops.length < nAft) allStops.push(makePlaceholder());
+        const aftStops = allStops.slice(0, nAft);
         redistributeStops(aftStops, t.aftStart, t.aftEnd);
         dayPlan.stops = aftStops;
       } else {
@@ -1169,9 +1396,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // --- Validation topographique des arrêts ---
     setProgress('Génération des tracés réels...', 75);
 
-    // Trier les POIs par fiabilité décroissante (transport > médical > commerce > ...)
+    // Trier par publicScore décroissant : fiabilité du type + richesse des tags
+    // + proximité d'un lieu de vie. Le tri JS étant stable, l'ordre par distance
+    // établi plus haut est préservé à score égal.
     const availablePOIs = [...filteredPOIs, ...preVerifiedCompetitors]
-      .sort((a, b) => (b.reliability || 1) - (a.reliability || 1));
+      .sort((a, b) => (b.publicScore || b.reliability || 1) - (a.publicScore || a.reliability || 1));
 
     const defaultComps = ['aldi', 'lidl', 'carrefour', 'store', 'brico', 'castorama', 'leroy'];
     const userCompsList = userCompetitors ? userCompetitors.split(',').map(s => s.trim().toLowerCase()) : [];
@@ -1273,6 +1502,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && !usedThisDay.has(p.name));
           if (idx === -1) idx = findFallback(p => !usedThisDay.has(p.name));
           if (idx === -1) idx = findFallback(() => true);
+          // Pool non vide → toujours préférer un lieu réel, même une école hors
+          // jour scolaire, plutôt que de retomber sur le repli centre-ville.
+          if (idx === -1) idx = 0;
 
           if (idx !== -1) {
             const fb = availablePOIs[idx];
@@ -1288,30 +1520,19 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           }
         }
 
-        // Dernier recours — UNIQUEMENT si aucun POI du tout
+        // Dernier recours — UNIQUEMENT si le pool est totalement vide.
+        // On ne génère JAMAIS de point à coordonnées aléatoires : c'était la
+        // cause des arrêts "en pleine campagne" remontés par les chauffeurs.
+        // On retombe sur le centre de l'origine, qui est un lieu réel et vérifié.
         if (!isLegit) {
-          let validStreet = null, finalLat = originObj.lat, finalLng = originObj.lng;
-          for (let attempt = 0; attempt < 5 && !validStreet; attempt++) {
-            const angle = Math.random() * Math.PI * 2;
-            const distKm = 0.3 + Math.random() * 1.5;
-            finalLat = originObj.lat + (distKm / 111) * Math.cos(angle);
-            finalLng = originObj.lng + (distKm / (111 * Math.cos(originObj.lat * Math.PI / 180))) * Math.sin(angle);
-            validStreet = await reverseGeocodeBAN(finalLat, finalLng);
-          }
-          stop.lat = finalLat;
-          stop.lng = finalLng;
-          if (validStreet) {
-            // Extraire le nom de rue comme nom de lieu (ex: "Rue du Général de Gaulle")
-            const streetName = validStreet.split(',')[0].replace(/^\d+\s*/, '').trim();
-            stop.type = 'shopping';
-            stop.locationName = streetName || 'Rue commerçante';
-            stop.address = validStreet;
-          } else {
-            stop.type = 'other';
-            stop.locationName = 'Centre-ville';
-            stop.address = originObj.display_name;
-          }
-          stop.source = 'GÉOLOCALISATION';
+          stop.lat = originObj.lat;
+          stop.lng = originObj.lng;
+          stop.type = 'other';
+          const street = await reverseGeocodeBAN(originObj.lat, originObj.lng);
+          stop.locationName = 'Centre-ville';
+          stop.address = street || originObj.display_name;
+          stop.source = 'CENTRE-VILLE (pool vide)';
+          console.warn('[POI] Pool vide — arrêt replié sur le centre-ville de l\'origine.');
         }
 
         // Reverse geocode différé si pas de vraie adresse postale
@@ -1640,7 +1861,6 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // Chaque créneau actif doit couvrir toute sa plage horaire.
     // Si le filtrage a laissé trop peu de lieux, on double les lieux existants
     // (au lieu de laisser un créneau avec un seul arrêt).
-    const MIN_STOPS_PER_SLOT = 3;
     const toMinCov = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
     for (let idx = 0; idx < data.dailyPlans.length; idx++) {
       const day = data.dailyPlans[idx];
@@ -1653,24 +1873,43 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       let morning   = day.stops.filter(s => toMinCov(s.time) < split);
       let afternoon = day.stops.filter(s => toMinCov(s.time) >= split);
 
-      // Double les lieux d'un créneau jusqu'à couvrir la plage.
+      // Double les lieux d'un créneau jusqu'à couvrir tous les secteurs.
       // Jamais les écoles ni les centres équestres (livrés une seule fois).
-      const padSlot = (arr) => {
-        if (arr.length === 0 || arr.length >= MIN_STOPS_PER_SLOT) return arr;
+      const padSlot = (arr, target) => {
+        if (arr.length === 0 || arr.length >= target) return arr;
         const pool = arr.filter(s => s.type !== 'school' && s.type !== 'equestrian');
         if (pool.length === 0) return arr; // rien à dupliquer sans risque
         let i = 0;
-        while (arr.length < MIN_STOPS_PER_SLOT) {
-          arr.push({ ...pool[i % pool.length], source: 'DOUBLON (couverture horaire)' });
+        while (arr.length < target) {
+          arr.push({ ...pool[i % pool.length], source: '2e passage' });
           i++;
         }
         return arr;
       };
 
-      if (t.hasMorning)   { morning   = padSlot(morning);   redistributeStops(morning,   t.mornStart, t.mornEnd); }
-      if (t.hasAfternoon) { afternoon = padSlot(afternoon); redistributeStops(afternoon, t.aftStart, t.aftEnd); }
+      if (t.hasMorning) {
+        morning = padSlot(morning, sectorCount(t.mornStart, t.mornEnd));
+        redistributeStops(morning, t.mornStart, t.mornEnd);
+      }
+      if (t.hasAfternoon) {
+        afternoon = padSlot(afternoon, sectorCount(t.aftStart, t.aftEnd));
+        redistributeStops(afternoon, t.aftStart, t.aftEnd);
+      }
 
       day.stops = [...morning, ...afternoon];
+    }
+
+    // --- Passe finale : affectation des plages de secteur (time + timeEnd) ---
+    // Exécutée en tout dernier, une fois le nombre d'arrêts définitivement figé
+    // (après l'injection des centres équestres et le padding de couverture).
+    applySectorTimes(data.dailyPlans, perDayTimes);
+
+    // --- Repères visuels : commerces identifiables autour de chaque secteur ---
+    const landmarkPool = [...filteredPOIs, ...preVerifiedCompetitors];
+    for (const day of data.dailyPlans) {
+      for (const stop of (day.stops || [])) {
+        stop.landmarks = findLandmarks(stop, landmarkPool);
+      }
     }
 
     // --- Rendu HTML sécurisé ---
@@ -1856,6 +2095,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     generatedData = data;
+    renderZoneLandmarks(zoneLandmarks);
     lucide.createIcons();
 
     setTimeout(() => {
