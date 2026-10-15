@@ -1336,7 +1336,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     try {
       rawText = await callActiveAI(keys, prompt, systemInstruction, geminiModel);
     } catch (e) {
-      throw new Error(`Serveurs IA indisponibles : ${e.message}`);
+      // Message sur sa propre ligne : e.message peut déjà énumérer un moteur
+      // par ligne (moteur choisi + replis), illisible accolé à un préfixe.
+      throw new Error(`Serveurs IA indisponibles.\n${e.message}`);
     }
 
     let data;

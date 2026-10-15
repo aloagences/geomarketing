@@ -73,7 +73,9 @@ async function callGeminiAPI(apiKey, prompt, systemInstruction, model) {
       const tierError = res.status === 403 || res.status === 404
         || /subscription tier|not available|not found|not supported/i.test(msg);
       console.error(`[Gemini Error ${res.status}] ${msg}`); // Debug log
-      const e = new Error(msg);
+      // Google renvoie son message sans se nommer. Non préfixé, un quota
+      // Gemini obtenu par repli ressemble à une erreur du moteur choisi.
+      const e = new Error(`Gemini : ${msg}`);
       e.tierError = tierError;
       e.status = res.status; // Ajoute le status HTTP pour détection de retry
       throw e;
@@ -317,6 +319,32 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
     );
   }
 
+  // Journal des échecs, moteur par moteur. Sans lui, un repli renvoyait le
+  // message brut du DERNIER moteur essayé : l'utilisateur qui avait choisi
+  // Mistral voyait un quota Gemini et croyait que l'appli ignorait son choix.
+  const echecs = [];
+  const libelle = (eng) => ENGINE_CONFIG?.[eng]?.label || eng;
+  const noter = (eng, e) => {
+    const lab = libelle(eng);
+    // Les messages Mistral/Groq sont déjà préfixés par leur label, Gemini non :
+    // on normalise pour ne pas écrire « Mistral AI : Mistral: … ».
+    const brut = (e?.message || 'erreur inconnue')
+      .replace(/^(Mistral|Groq|OpenAI|OpenRouter|Gemini)\s*(AI)?\s*:\s*/i, '')
+      .trim();
+    echecs.push(`${lab} : ${brut}`);
+  };
+  // Un seul moteur en cause → message direct. Plusieurs → on montre la chaîne
+  // complète, le moteur choisi en premier, pour que la vraie cause soit lisible.
+  const erreurFinale = (e) => {
+    if (echecs.length <= 1) return e;
+    const composite = new Error(
+      `${echecs[0]}\nRepli automatique également en échec → ${echecs.slice(1).join(' | ')}`
+    );
+    composite.status = e?.status;
+    composite.retryAfterMs = e?.retryAfterMs;
+    return composite;
+  };
+
   let lastErr;
   for (const engine of engines) {
     try {
@@ -324,6 +352,7 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
       return await throttleAI(() => dispatchAI(engine, keys[engine], prompt, systemInstruction, geminiModel));
     } catch (e) {
       lastErr = e;
+      noter(engine, e);
       // Ne basculer QUE sur les erreurs de TIER/ACCÈS, jamais sur quota/rate-limit/high-demand
       // Si l'utilisateur a choisi un moteur et il y a saturation temporaire, relancer l'erreur
       // pour que les retries automatiques (fetchWithRetry) la gèrent
@@ -335,12 +364,12 @@ async function callActiveAI(keys, prompt, systemInstruction, geminiModel) {
 
       if (!isTierError || isLastEngine) {
         console.error(`[IA] Erreur non-basculable ou dernier moteur → RELANCE`);
-        throw e;
+        throw erreurFinale(e);
       }
       console.warn(`[IA] ${engine} indisponible (tier/accès) → bascule sur ${engines[engines.indexOf(engine) + 1]}…`);
     }
   }
-  throw lastErr;
+  throw erreurFinale(lastErr);
 }
 
 // ========================================
