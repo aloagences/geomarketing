@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.8.1 — 15 octobre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.9 — 19 octobre 2026</span>
       </div>
     </header>
 
@@ -211,12 +211,27 @@
                   <input class="input-style border-red-200 focus:border-red-500 transition-colors duration-500" id="competitors" type="text" placeholder="Ex: Aldi, Carrefour..." />
                 </div>
 
-                <div class="col-span-1 md:col-span-2 border-l-4 border-green-500 pl-3 py-1 bg-green-50 rounded-r-lg">
-                  <label for="priorityCities" class="block text-sm font-bold text-green-800 mb-1 flex items-center justify-between">
-                    <span class="flex items-center"><i data-lucide="map-pin-plus" class="w-4 h-4 mr-1"></i> Villes / quartiers à prioriser</span>
+                <div class="col-span-1 md:col-span-2 border-l-4 border-green-500 pl-3 py-2 bg-green-50 rounded-r-lg">
+                  <label class="block text-sm font-bold text-green-800 mb-1.5 flex items-center justify-between">
+                    <span class="flex items-center"><i data-lucide="map-pin-plus" class="w-4 h-4 mr-1"></i> Zones à prioriser</span>
                     <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Optionnel</span>
                   </label>
-                  <input class="input-style border-green-200 focus:border-green-500" id="priorityCities" type="text" placeholder="Ex: Centre-ville, Quartier des Halles, Pamiers…" />
+
+                  <button type="button" id="openInseeBtn"
+                          class="w-full flex items-center justify-center gap-2 bg-white hover:bg-emerald-600 hover:text-white text-emerald-700 border-2 border-emerald-500 font-extrabold text-sm py-2.5 rounded-xl transition-colors">
+                    <i data-lucide="layers" class="w-4 h-4"></i>
+                    Choisir les zones sur la carte INSEE
+                  </button>
+                  <p class="text-[11px] text-green-700/80 mt-1 leading-snug">
+                    Carreaux de 200 m avec le nombre réel d'habitants (INSEE Filosofi). Renseignez d'abord l'adresse de départ et le rayon.
+                  </p>
+
+                  <div id="inseeSummary" class="hidden mt-2 bg-white border border-emerald-200 rounded-xl px-3 py-2"></div>
+
+                  <details class="mt-2">
+                    <summary class="text-[11px] font-bold text-green-800/70 cursor-pointer hover:text-green-900">ou saisir des noms à la main</summary>
+                    <input class="input-style border-green-200 focus:border-green-500 mt-1.5" id="priorityCities" type="text" placeholder="Ex: Centre-ville, Quartier des Halles, Pamiers…" />
+                  </details>
                 </div>
 
                 <div class="col-span-1 md:col-span-2 border-l-4 border-orange-500 pl-3 py-1 bg-orange-50 rounded-r-lg">
@@ -579,11 +594,76 @@
     <img src="https://i.ibb.co/Lh6tRK1R/Plan-de-circulation-Aviva.png" crossorigin="anonymous" style="width:100%;height:100%;object-fit:contain;" alt="" />
   </div>
 
+  <!-- Carte du potentiel INSEE (carreaux 200 m) -->
+  <div id="inseeModal" class="fixed inset-0 z-[3000] hidden">
+    <div id="inseeModalBackdrop" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+    <div class="relative mx-auto my-3 w-[min(1280px,97vw)] h-[min(94vh,920px)] bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+
+      <div class="flex items-start justify-between gap-4 px-5 py-3 border-b border-gray-200 flex-shrink-0">
+        <div class="min-w-0">
+          <h3 class="font-extrabold text-lg text-[#0E2C59] flex items-center gap-2">
+            <i data-lucide="layers" class="w-5 h-5 text-emerald-600"></i> Potentiel de population
+          </h3>
+          <p class="text-xs text-gray-500 truncate" id="inseeAdresse"></p>
+        </div>
+        <button type="button" id="inseeAnnulerBtn" class="text-gray-400 hover:text-gray-700 flex-shrink-0 p-1" aria-label="Fermer">
+          <i data-lucide="x" class="w-6 h-6"></i>
+        </button>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-2 px-5 py-2 border-b border-gray-100 bg-gray-50 flex-shrink-0">
+        <button type="button" id="inseeAutoBtn" class="text-xs font-bold bg-[#0E2C59] text-white px-3 py-1.5 rounded-lg hover:bg-[#1e3a6f] flex items-center gap-1.5">
+          <i data-lucide="wand-2" class="w-3.5 h-3.5"></i> Sélection auto (60 % de la population)
+        </button>
+        <button type="button" id="inseePinceauBtn" class="text-xs font-bold bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 flex items-center gap-1.5">
+          <i data-lucide="brush" class="w-3.5 h-3.5"></i> Pinceau
+        </button>
+        <button type="button" id="inseeEffacerBtn" class="text-xs font-bold bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 flex items-center gap-1.5">
+          <i data-lucide="eraser" class="w-3.5 h-3.5"></i> Tout effacer
+        </button>
+        <div class="flex items-center gap-2.5 ml-auto" id="inseeLegende"></div>
+      </div>
+
+      <div class="relative flex-1 min-h-0">
+        <div id="inseeMap" class="absolute inset-0 bg-gray-100 z-0"></div>
+
+        <div id="inseeChargement" class="absolute inset-0 bg-white/90 flex flex-col items-center justify-center z-[1000] hidden">
+          <div class="w-8 h-8 mb-3 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin"></div>
+          <p class="text-sm font-bold text-[#0E2C59]">Chargement des carreaux INSEE…</p>
+          <p class="text-xs text-gray-500 mt-1">Géoplateforme IGN · Filosofi 200 m</p>
+        </div>
+
+        <div id="inseeErreur" class="absolute inset-0 bg-white/95 flex items-center justify-center z-[1000] hidden px-8">
+          <div class="flex items-start gap-3 max-w-lg bg-amber-50 border border-amber-200 rounded-2xl p-4">
+            <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"></i>
+            <p class="text-sm text-amber-900" id="inseeErreurTexte"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-4 px-5 py-3 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+        <div class="flex items-center gap-5 text-sm">
+          <div><span class="font-extrabold text-xl text-emerald-700" id="inseeStatHab">0</span> <span class="text-gray-500 text-xs font-bold uppercase tracking-wide">habitants</span></div>
+          <div><span class="font-extrabold text-lg text-[#0E2C59]" id="inseeStatMen">0</span> <span class="text-gray-500 text-xs font-bold uppercase tracking-wide">ménages</span></div>
+          <div class="text-gray-400 text-xs"><span id="inseeStatCarreaux">0</span> carreaux · <span id="inseeStatPart">0 %</span> du rayon</div>
+        </div>
+        <div class="flex items-center gap-2 ml-auto">
+          <button type="button" id="inseeAnnulerBtn2" class="text-sm font-bold text-gray-600 hover:text-gray-900 px-4 py-2">Annuler</button>
+          <button type="button" id="inseeValiderBtn" disabled
+                  class="text-sm font-extrabold bg-emerald-600 text-white px-5 py-2.5 rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2">
+            <i data-lucide="check" class="w-4 h-4"></i> Valider ces zones
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.8.1"></script>
-  <script src="js/api.js?v=5.8.1"></script>
-  <script src="js/map.js?v=5.8.1"></script>
-  <script src="js/export.js?v=5.8.1"></script>
-  <script src="js/app.js?v=5.8.1"></script>
+  <script src="js/utils.js?v=5.9"></script>
+  <script src="js/api.js?v=5.9"></script>
+  <script src="js/insee.js?v=5.9"></script>
+  <script src="js/map.js?v=5.9"></script>
+  <script src="js/export.js?v=5.9"></script>
+  <script src="js/app.js?v=5.9"></script>
 </body>
 </html>

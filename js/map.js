@@ -5,6 +5,7 @@
 let mapInstance = null;
 let markersLayer = null;
 let heatLayer = null;
+let inseeLayer = null;
 
 function drawMap(data, origin, radiusKm) {
   if (!mapInstance) {
@@ -23,10 +24,14 @@ function drawMap(data, origin, radiusKm) {
   } else {
     markersLayer.clearLayers();
     if (heatLayer) mapInstance.removeLayer(heatLayer);
+    if (inseeLayer) mapInstance.removeLayer(inseeLayer);
     mapInstance.setView([origin.lat, origin.lng], 13);
   }
 
   mapInstance.invalidateSize();
+
+  // Zones INSEE validées : posées avant les marqueurs pour rester en fond.
+  inseeLayer = dessinerSelectionINSEE(mapInstance);
 
   // Marqueur QG
   const qgIcon = L.divIcon({

@@ -1046,9 +1046,12 @@ async function handleGenerate() {
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     };
 
-    // inPriorityZone : vérifie le flag, la proximité GPS, ou le texte
+    // inPriorityZone : vérifie le flag, la sélection INSEE, la proximité GPS,
+    // ou le texte. Le test INSEE passe en premier : c'est le seul qui repose
+    // sur une géométrie exacte plutôt que sur un rayon ou une chaîne.
     const inPriorityZone = (name = '', address = '', lat = null, lng = null, flagged = false) => {
       if (flagged) return true;
+      if (lat !== null && lng !== null && dansSelectionINSEE(lat, lng)) return true;
       if (lat !== null && lng !== null && priorityZoneCoords.length > 0) {
         if (priorityZoneCoords.some(c => distKmPriority(c.lat, c.lng, lat, lng) <= 3)) return true;
       }
@@ -1116,6 +1119,40 @@ async function handleGenerate() {
       }
     }
 
+    // --- Secteurs sélectionnés sur la carte du potentiel INSEE ---
+    // On va chercher des POI autour de chaque secteur retenu : sans cette
+    // passe, la sélection n'aurait aucun candidat à proposer si la requête
+    // Overpass initiale, centrée sur le QG, ne les couvrait pas.
+    const inseeSecteurs = (inseeSelection?.secteurs || []).slice(0, 6);
+    if (inseeSecteurs.length > 0) {
+      setProgress('Recherche dans les zones INSEE sélectionnées…', 50);
+
+      const lots = await Promise.all(inseeSecteurs.map(async (sec) => {
+        // Rayon couvrant le secteur : chaque carreau fait 0,04 km².
+        const rayonSec = Math.min(4, Math.sqrt((sec.nbCarreaux * 0.04) / Math.PI) + 0.4);
+        try {
+          return { sec, pois: await fetchRealPOIs(sec.lat, sec.lng, rayonSec) };
+        } catch (e) {
+          console.warn(`[INSEE] POI indisponibles pour ${sec.commune}`, e);
+          return { sec, pois: [] };
+        }
+      }));
+
+      for (const { sec, pois } of lots) {
+        const nouveaux = pois.filter(p =>
+          !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
+          !isBlocked(p.name, p.address, p.lat, p.lng)
+        );
+        nouveaux.forEach(p => { p._priorityZone = true; p._insee = true; });
+        // Les POI déjà connus qui tombent dans la sélection héritent du flag.
+        filteredPOIs.forEach(p => {
+          if (dansSelectionINSEE(p.lat, p.lng)) { p._priorityZone = true; p._insee = true; }
+        });
+        filteredPOIs.push(...nouveaux);
+        console.log(`[INSEE] Secteur "${sec.commune}" (${sec.ind} hab., ${sec.nbCarreaux} carreaux) → +${nouveaux.length} POI(s)`);
+      }
+    }
+
     // --- Bonus "lieu de vie" : proximité d'un centre de peuplement ---
     // Un POI à moins de 800 m d'un bourg/village/quartier est un lieu fréquenté.
     // Mesure directe, contrairement au comptage de voisins qui ne refléterait
@@ -1172,9 +1209,12 @@ async function handleGenerate() {
     // --- Construction du prompt IA ---
     // On n'envoie que les champs utiles (nom, adresse, type, coords, distance)
     // et limité à 50 POI pour accélérer — moins de tokens = génération rapide.
+    // `insee: 1` marque les lieux situés dans une zone validée par le client :
+    // sans ce drapeau, l'IA n'aurait aucun moyen d'appliquer le quota de 60%.
     const slimPOIs = filteredPOIs.slice(0, 50).map(p => ({
       name: p.name, address: p.address, type: p.type,
       lat: p.lat, lng: p.lng, dist: p.distance,
+      ...(dansSelectionINSEE(p.lat, p.lng) ? { insee: 1 } : {}),
     }));
     let poiContext = filteredPOIs.length > 0
       ? `BASE OSM DÉDIÉE :\n${JSON.stringify(slimPOIs)}\n`
@@ -1198,7 +1238,19 @@ async function handleGenerate() {
       ? 'CONCURRENTS: Inclus au moins 1-2 par jour tirés de la BASE CONCURRENTS CERTIFIÉS.'
       : 'CONCURRENTS: Aucun trouvé dans le périmètre.';
 
+    // Secteurs INSEE : on donne à l'IA la population réelle de chaque zone
+    // retenue, pour qu'elle hiérarchise les journées sur le potentiel mesuré
+    // et non sur l'ordre de saisie.
+    const inseeInstruction = inseeSecteurs.length > 0
+      ? `ZONES INSEE SÉLECTIONNÉES PAR LE CLIENT (${inseeSelection.totalInd} habitants au total) — ce sont LES zones à couvrir en priorité, par ordre de potentiel : `
+        + inseeSecteurs.map((s, i) =>
+            `[${i + 1}] ${s.commune || 'secteur'} (${s.ind} hab., ${s.men} ménages, centre ${s.lat.toFixed(4)},${s.lng.toFixed(4)})`
+          ).join(' ; ')
+        + `. Au moins 60% des arrêts doivent se trouver à moins de 1 km du centre d'une de ces zones, et chaque zone du top 3 doit être visitée au moins une fois sur la période.`
+      : '';
+
     const exclusionInstruction = [
+      inseeInstruction,
       priorityList.length > 0
         ? `ZONES PRIORITAIRES : inclure au moins 10% des arrêts dans ou autour de : ${priorityList.join(', ').toUpperCase()}. Ces zones doivent apparaître au moins 1 fois par journée.`
         : '',
@@ -2398,4 +2450,44 @@ document.addEventListener('DOMContentLoaded', () => {
   // Événements
   el.btn.addEventListener('click', handleGenerate);
   document.getElementById('downloadPdfBtn').addEventListener('click', () => generateFullPDF(generatedData, inputRefs));
+
+  initInseeUI();
+  document.getElementById('openInseeBtn')?.addEventListener('click', handleOpenInsee);
 });
+
+/**
+ * Ouvre la carte du potentiel INSEE centrée sur l'adresse de départ.
+ * Le géocodage est fait ici et non à la génération : sans point d'origine ni
+ * rayon, la carte n'aurait aucune emprise à charger.
+ */
+async function handleOpenInsee() {
+  const adresse = inputRefs.address?.value?.trim();
+  if (!adresse) {
+    return showMessage("Renseignez d'abord l'adresse du point de départ : la carte du potentiel se centre dessus.");
+  }
+  const rayon = parseFloat(inputRefs.radius?.value) || 10;
+
+  const bouton = document.getElementById('openInseeBtn');
+  const htmlInitial = bouton.innerHTML;
+  bouton.disabled = true;
+  bouton.innerHTML = 'Localisation de l\'adresse…';
+
+  let origine;
+  try {
+    origine = await geocodeAddressBAN(adresse);
+  } catch (e) {
+    showMessage(`Adresse introuvable : ${e.message}`);
+    return;
+  } finally {
+    bouton.disabled = false;
+    bouton.innerHTML = htmlInitial;
+    lucide.createIcons();
+  }
+
+  showMessage('');
+  const selection = await openInseeMap(origine, rayon);
+  if (selection) {
+    renderInseeSummary();
+    lucide.createIcons();
+  }
+}
