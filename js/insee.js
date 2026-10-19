@@ -140,6 +140,36 @@ function _construireIndex(carreaux) {
   }
 }
 
+/** Largeur du pinceau, en nombre de carreaux (1 = un seul carreau). */
+let _inseeTaille = 1;
+
+/**
+ * Carreaux couverts par le pinceau. À la taille 1 on exige que le curseur
+ * soit réellement dans le carreau ; au-delà, on prend tout ce qui tombe dans
+ * le disque du pinceau — c'est ce qui permet de peindre un quartier d'un geste.
+ */
+function _carreauxSousPinceau(lat, lng) {
+  if (_inseeTaille <= 1) {
+    const c = _carreauSous(lat, lng);
+    return c ? [c] : [];
+  }
+  const rayonKm = (_inseeTaille * 0.2) / 2;
+  // Les cases d'index font ~200 m en latitude mais ~140 m en longitude :
+  // on élargit la portée sur la plus petite pour ne rien manquer.
+  const portee = Math.ceil(rayonKm / 0.14) + 1;
+  const bLat = Math.round(lat * INSEE_PAS_INDEX);
+  const bLng = Math.round(lng * INSEE_PAS_INDEX);
+  const res = [];
+  for (let dy = -portee; dy <= portee; dy++) {
+    for (let dx = -portee; dx <= portee; dx++) {
+      for (const c of (_inseeIndex.get(`${bLat + dy}_${bLng + dx}`) || [])) {
+        if (calculateDistance(lat, lng, c.lat, c.lng) <= rayonKm) res.push(c);
+      }
+    }
+  }
+  return res;
+}
+
 /** Carreau situé sous un point de la carte, ou null. */
 function _carreauSous(lat, lng) {
   const bLat = Math.round(lat * INSEE_PAS_INDEX);
@@ -255,12 +285,13 @@ function _basculerCarreau(c) {
   _majStatsINSEE();
 }
 
+// Ne met pas à jour le compteur : avec un gros pinceau, ce sont des centaines
+// de carreaux par déplacement de souris. L'appelant rafraîchit une seule fois.
 function _peindreCarreau(c, actif) {
   const deja = _inseeChoisis.has(c.cle);
   if (actif === deja) return;
   if (actif) _inseeChoisis.add(c.cle); else _inseeChoisis.delete(c.cle);
   _inseeCouches.get(c.cle)?.setStyle(_styleCarreau(c));
-  _majStatsINSEE();
 }
 
 function _rendreLegendeINSEE() {
@@ -339,7 +370,7 @@ async function openInseeMap(origin, radiusKm) {
     );
     // Le pinceau est géré au niveau de la carte, pas du polygone : pendant un
     // glisser, le navigateur n'envoie plus de mouseover aux formes survolées.
-    poly.on('click', () => { if (!_inseePinceau) _basculerCarreau(c); });
+      poly.on('click', () => { if (!_inseePinceau) _basculerCarreau(c); });
     _inseeCouches.set(c.cle, poly);
   }
   _construireIndex(_inseeCarreaux);
@@ -362,17 +393,22 @@ let _inseePeintActif = false;
  *  comme un pinceau qui bascule selon ce qu'il touche en premier. */
 function _pinceauDebut(e) {
   if (!_inseePinceau) return;
-  const c = _carreauSous(e.latlng.lat, e.latlng.lng);
-  if (!c) return;
-  _inseePeintEn = !_inseeChoisis.has(c.cle);
+  const lot = _carreauxSousPinceau(e.latlng.lat, e.latlng.lng);
+  if (!lot.length) return;
+  // Le carreau sous le centre du pinceau décide du sens : s'il est déjà
+  // retenu on gomme, sinon on ajoute. Tout le lot suit ce même sens.
+  const pivot = _carreauSous(e.latlng.lat, e.latlng.lng) || lot[0];
+  _inseePeintEn = !_inseeChoisis.has(pivot.cle);
   _inseePeintActif = true;
-  _peindreCarreau(c, _inseePeintEn);
+  lot.forEach(c => _peindreCarreau(c, _inseePeintEn));
+  _majStatsINSEE();
 }
 
 function _pinceauDeplace(e) {
   if (!_inseePinceau || !_inseePeintActif) return;
-  const c = _carreauSous(e.latlng.lat, e.latlng.lng);
-  if (c) _peindreCarreau(c, _inseePeintEn);
+  _carreauxSousPinceau(e.latlng.lat, e.latlng.lng)
+    .forEach(c => _peindreCarreau(c, _inseePeintEn));
+  _majStatsINSEE();
 }
 
 function _fermerInsee(resultat) {
@@ -410,6 +446,21 @@ function initInseeUI() {
 
   _inseeEl('inseeAutoBtn')?.addEventListener('click', () => _selectionAutoINSEE(0.6));
 
+  // Taille du pinceau : 1, 3, 5 ou 9 carreaux de large.
+  document.querySelectorAll('.insee-taille').forEach(b => {
+    b.addEventListener('click', () => {
+      _inseeTaille = parseInt(b.dataset.taille, 10) || 1;
+      document.querySelectorAll('.insee-taille').forEach(o => {
+        const actif = o === b;
+        o.classList.toggle('bg-emerald-600', actif);
+        o.classList.toggle('text-white', actif);
+        o.classList.toggle('bg-gray-100', !actif);
+        o.classList.toggle('text-gray-700', !actif);
+      });
+      _inseeEl('inseeTailleMetres').textContent = `${_inseeTaille * 200} m`;
+    });
+  });
+
   _inseeEl('inseePinceauBtn')?.addEventListener('click', (ev) => {
     _inseePinceau = !_inseePinceau;
     const b = ev.currentTarget;
@@ -417,6 +468,9 @@ function initInseeUI() {
     b.classList.toggle('text-white', _inseePinceau);
     b.classList.toggle('bg-gray-100', !_inseePinceau);
     b.classList.toggle('text-gray-700', !_inseePinceau);
+    // Le réglage de taille ne sert à rien hors mode pinceau.
+    _inseeEl('inseeTailleGroupe')?.classList.toggle('hidden', !_inseePinceau);
+    _inseeEl('inseeTailleGroupe')?.classList.toggle('flex', _inseePinceau);
     // Le pinceau et le déplacement de la carte se disputent le glisser :
     // on coupe le drag tant que le pinceau est actif.
     if (_inseeMap) {
@@ -469,16 +523,53 @@ function renderInseeSummary() {
   box.classList.remove('hidden');
 }
 
-/** Dessine la sélection sur la carte du plan généré. */
+/** Les 4 coins d'un carreau, repérés par leur position vis-à-vis du centre. */
+function _coinsCarreau(c) {
+  const coins = {};
+  for (const [lat, lng] of c.ring.slice(0, 4)) {
+    coins[(lat > c.lat ? 'N' : 'S') + (lng > c.lng ? 'E' : 'O')] = [lat, lng];
+  }
+  return coins;
+}
+
+/**
+ * Contour extérieur de la sélection : on ne garde que les côtés qui donnent
+ * sur un carreau non retenu. 463 carrés pleins écrasaient la heatmap du plan ;
+ * un liseré autour de chaque secteur situe la zone sans masquer la chaleur.
+ */
+function perimetreSelection(carreaux) {
+  const grille = new Map();
+  carreaux.forEach(c => { if (c.n !== null) grille.set(`${c.n}/${c.e}`, true); });
+
+  const segments = [];
+  for (const c of carreaux) {
+    if (c.n === null) continue;
+    const k = _coinsCarreau(c);
+    if (!k.NE || !k.NO || !k.SE || !k.SO) continue;
+    if (!grille.has(`${c.n + 200}/${c.e}`)) segments.push([k.NO, k.NE]);
+    if (!grille.has(`${c.n - 200}/${c.e}`)) segments.push([k.SO, k.SE]);
+    if (!grille.has(`${c.n}/${c.e + 200}`)) segments.push([k.NE, k.SE]);
+    if (!grille.has(`${c.n}/${c.e - 200}`)) segments.push([k.NO, k.SO]);
+  }
+  return segments;
+}
+
+/** Dessine la sélection sur la carte du plan généré, en fond discret. */
 function dessinerSelectionINSEE(map) {
   if (!inseeSelection?.carreaux?.length || !map) return null;
   const couche = L.layerGroup();
+
+  // Voile très léger : il suffit à teinter la zone, la heatmap passe au-dessus.
   for (const c of inseeSelection.carreaux) {
     L.polygon(c.ring, {
-      color: '#047857', weight: 0.8, opacity: 0.7,
-      fillColor: '#10b981', fillOpacity: 0.22, interactive: false,
+      stroke: false, fillColor: '#10b981', fillOpacity: 0.10, interactive: false,
     }).addTo(couche);
   }
+
+  L.polyline(perimetreSelection(inseeSelection.carreaux), {
+    color: '#047857', weight: 1.8, opacity: 0.85, interactive: false,
+  }).addTo(couche);
+
   couche.addTo(map);
   return couche;
 }

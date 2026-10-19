@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.9 — 19 octobre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.9.1 — 19 octobre 2026</span>
       </div>
     </header>
 
@@ -618,6 +618,15 @@
         <button type="button" id="inseePinceauBtn" class="text-xs font-bold bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 flex items-center gap-1.5">
           <i data-lucide="brush" class="w-3.5 h-3.5"></i> Pinceau
         </button>
+
+        <div id="inseeTailleGroupe" class="hidden items-center gap-1 bg-white border border-gray-200 rounded-lg pl-2 pr-1 py-1">
+          <span class="text-[10px] font-extrabold uppercase text-gray-400 tracking-wider">Taille</span>
+          <button type="button" data-taille="1" class="insee-taille text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white">1</button>
+          <button type="button" data-taille="3" class="insee-taille text-[11px] font-bold px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">3</button>
+          <button type="button" data-taille="5" class="insee-taille text-[11px] font-bold px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">5</button>
+          <button type="button" data-taille="9" class="insee-taille text-[11px] font-bold px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">9</button>
+          <span class="text-[10px] text-gray-400 pl-1 pr-0.5" id="inseeTailleMetres">200 m</span>
+        </div>
         <button type="button" id="inseeEffacerBtn" class="text-xs font-bold bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 flex items-center gap-1.5">
           <i data-lucide="eraser" class="w-3.5 h-3.5"></i> Tout effacer
         </button>
@@ -659,11 +668,11 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.9"></script>
-  <script src="js/api.js?v=5.9"></script>
-  <script src="js/insee.js?v=5.9"></script>
-  <script src="js/map.js?v=5.9"></script>
-  <script src="js/export.js?v=5.9"></script>
-  <script src="js/app.js?v=5.9"></script>
+  <script src="js/utils.js?v=5.9.1"></script>
+  <script src="js/api.js?v=5.9.1"></script>
+  <script src="js/insee.js?v=5.9.1"></script>
+  <script src="js/map.js?v=5.9.1"></script>
+  <script src="js/export.js?v=5.9.1"></script>
+  <script src="js/app.js?v=5.9.1"></script>
 </body>
 </html>
