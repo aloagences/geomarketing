@@ -13,6 +13,9 @@ let officialPopulation = null;
 // Renseigné quand le nombre de lieux trouvés est inférieur au nombre d'arrêts
 // à couvrir : affiché en fin de génération, au-dessus du plan.
 let poolMaigre = null;
+// Vrai quand le plan repose sur la fiche de repérage ou les centres INSEE,
+// la requête principale OpenStreetMap n'ayant rien ramené.
+let poolDeSecours = false;
 
 function initDomRefs() {
   el.form = document.getElementById('clientForm');
@@ -841,6 +844,7 @@ async function handleGenerate() {
 
     // Reset UI
     poolMaigre = null;
+    poolDeSecours = false;
     ['potentialMap', 'mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard',
      'reachEstimationContainer', 'officialBadges', 'badgeSiren', 'badgeInsee',
      'badgePop', 'analysisCard'
@@ -1214,19 +1218,54 @@ async function handleGenerate() {
       return parseFloat(a.distance) - parseFloat(b.distance);
     });
 
-    // --- Garde-fou : pas de plan sans lieux réels ---
-    // Sans ce contrôle, une panne des serveurs OpenStreetMap produisait quand
-    // même un PDF : l'IA recevait « BASE OSM VIDE », rendait deux ou trois
-    // arrêts, et le repli final les posait tous à l'adresse du dépôt. Le
-    // chauffeur se retrouvait avec trois fois le même point et aucun
-    // après-midi. Mieux vaut s'arrêter net et dire pourquoi.
+    // --- Sauvetage quand la requête principale n'a rien ramené ---
+    // Une panne d'Overpass vidait le pool et tous les arrêts retombaient sur
+    // l'adresse du dépôt. Or deux gisements de lieux réels restaient
+    // inexploités : la fiche de repérage (gares, arrêts de bus, marchés,
+    // places), qui vient d'une requête distincte avec ses propres tentatives,
+    // et les centres des communes sélectionnées sur la carte INSEE. Mieux vaut
+    // un plan bâti sur ces points-là, quitte à les répéter, que vingt arrêts
+    // au dépôt.
     if (filteredPOIs.length === 0) {
-      throw new Error(
-        "Aucun lieu exploitable trouvé autour de cette adresse. Les serveurs cartographiques "
-        + "OpenStreetMap n'ont pas répondu ou ne couvrent pas ce secteur. Relancez la génération "
-        + "dans quelques minutes, ou élargissez le rayon de campagne. Aucun plan n'a été produit : "
-        + "il aurait placé tous les arrêts sur l'adresse de départ."
-      );
+      const deRepere = [];
+      const verser = (items, type, score) => (items || []).forEach(it => {
+        if (!it?.lat || !it?.lng) return;
+        deRepere.push({
+          name: it.name,
+          address: it.city ? `${it.name}, ${it.city}` : it.name,
+          type, lat: it.lat, lng: it.lng,
+          distance: it.distance,
+          publicScore: score, hasProperName: true, marketDays: [],
+        });
+      });
+      verser(zoneLandmarks?.stations, 'transport', 12);
+      verser(zoneLandmarks?.markets,  'market',    11);
+      verser(zoneLandmarks?.places,   'other',      9);
+      verser(zoneLandmarks?.busStops, 'transport',  7);
+
+      if (deRepere.length > 0) {
+        filteredPOIs = deRepere.filter(p => !isBlocked(p.name, p.address, p.lat, p.lng));
+        console.warn(`[POI] Pool principal vide → ${filteredPOIs.length} lieu(x) repris de la fiche de repérage.`);
+      }
+
+      // Toujours rien : les communes retenues sur la carte INSEE sont des
+      // centres de population réels, avec un nom et des coordonnées sûres.
+      if (filteredPOIs.length === 0 && inseeSelection?.communes?.length) {
+        // Élision : « Centre d'Alleins », pas « Centre de Alleins ». Ce nom
+        // part tel quel sur la feuille de route du chauffeur.
+        const centreDe = (nom) => /^[aeiouyàâéèêëîïôöùûü]/i.test(nom)
+          ? `Centre d'${nom}` : `Centre de ${nom}`;
+        filteredPOIs = inseeSelection.communes.slice(0, 10).map(c => ({
+          name: centreDe(c.commune),
+          address: c.commune,
+          type: 'other', lat: c.lat, lng: c.lng,
+          distance: calculateDistance(originObj.lat, originObj.lng, c.lat, c.lng).toFixed(1),
+          publicScore: 6, hasProperName: true, marketDays: [],
+        })).filter(p => !isBlocked(p.name, p.address, p.lat, p.lng));
+        console.warn(`[POI] Repli INSEE → ${filteredPOIs.length} centre(s) de commune.`);
+      }
+
+      poolDeSecours = filteredPOIs.length > 0;
     }
 
     // --- Construction du prompt IA ---
@@ -2274,11 +2313,21 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     renderZoneLandmarks(zoneLandmarks);
     lucide.createIcons();
 
-    if (poolMaigre) {
+    if (poolMaigre || poolDeSecours) {
+      const n = poolMaigre?.trouves ?? 0;
+      const besoin = poolMaigre?.besoin ?? 0;
       showMessage(
-        `Plan généré avec ${poolMaigre.trouves} lieu(x) seulement pour ${poolMaigre.besoin} arrêts à couvrir : `
-        + `certains secteurs seront repassés plusieurs fois (mention « 2e passage »). `
-        + `Pour plus de variété, élargissez le rayon ou relancez — les serveurs OpenStreetMap répondaient mal.`,
+        (poolDeSecours
+          ? `La recherche de commerces n'a rien ramené (serveurs OpenStreetMap indisponibles). `
+            + `Le plan a été bâti sur les points de repère de la zone — gares, arrêts de bus, marchés, places. `
+          : n === 0
+            ? `Aucun lieu n'a pu être récupéré : les serveurs OpenStreetMap sont indisponibles et tous `
+              + `les arrêts sont repliés sur l'adresse de départ. Ce plan n'est PAS exploitable tel quel — `
+              + `relancez la génération dans quelques minutes. `
+            : `Plan généré avec ${n} lieu(x) pour ${besoin} arrêts à couvrir. `)
+        + `Tous les créneaux sont couverts, mais certains secteurs sont repassés plusieurs fois `
+        + `(mentions « 2e passage » et « report de créneau »). Relancez dans quelques minutes `
+        + `pour un plan plus varié, ou élargissez le rayon.`,
         'warn'
       );
     }
