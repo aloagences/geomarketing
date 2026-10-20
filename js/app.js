@@ -10,6 +10,9 @@ const el = {};
 const inputRefs = {};
 let generatedData = null;
 let officialPopulation = null;
+// Renseigné quand le nombre de lieux trouvés est inférieur au nombre d'arrêts
+// à couvrir : affiché en fin de génération, au-dessus du plan.
+let poolMaigre = null;
 
 function initDomRefs() {
   el.form = document.getElementById('clientForm');
@@ -206,9 +209,11 @@ function showMessage(msg, type = 'error') {
   }
   el.alertText.textContent = msg; // textContent = pas de XSS
   el.alertBox.style.display = 'block';
-  el.alertBox.className = type === 'error'
-    ? 'alert-box bg-red-50 text-red-800 border-red-500'
-    : 'alert-box bg-emerald-50 text-emerald-800 border-emerald-500';
+  el.alertBox.className = {
+    error: 'alert-box bg-red-50 text-red-800 border-red-500',
+    warn:  'alert-box bg-amber-50 text-amber-900 border-amber-500',
+    success: 'alert-box bg-emerald-50 text-emerald-800 border-emerald-500',
+  }[type] || 'alert-box bg-emerald-50 text-emerald-800 border-emerald-500';
   lucide.createIcons();
   el.alertBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -835,6 +840,7 @@ async function handleGenerate() {
     setProgress('Initialisation...', 5);
 
     // Reset UI
+    poolMaigre = null;
     ['potentialMap', 'mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard',
      'reachEstimationContainer', 'officialBadges', 'badgeSiren', 'badgeInsee',
      'badgePop', 'analysisCard'
@@ -1208,6 +1214,21 @@ async function handleGenerate() {
       return parseFloat(a.distance) - parseFloat(b.distance);
     });
 
+    // --- Garde-fou : pas de plan sans lieux réels ---
+    // Sans ce contrôle, une panne des serveurs OpenStreetMap produisait quand
+    // même un PDF : l'IA recevait « BASE OSM VIDE », rendait deux ou trois
+    // arrêts, et le repli final les posait tous à l'adresse du dépôt. Le
+    // chauffeur se retrouvait avec trois fois le même point et aucun
+    // après-midi. Mieux vaut s'arrêter net et dire pourquoi.
+    if (filteredPOIs.length === 0) {
+      throw new Error(
+        "Aucun lieu exploitable trouvé autour de cette adresse. Les serveurs cartographiques "
+        + "OpenStreetMap n'ont pas répondu ou ne couvrent pas ce secteur. Relancez la génération "
+        + "dans quelques minutes, ou élargissez le rayon de campagne. Aucun plan n'a été produit : "
+        + "il aurait placé tous les arrêts sur l'adresse de départ."
+      );
+    }
+
     // --- Construction du prompt IA ---
     // On n'envoie que les champs utiles (nom, adresse, type, coords, distance)
     // et limité à 50 POI pour accélérer — moins de tokens = génération rapide.
@@ -1356,6 +1377,17 @@ async function handleGenerate() {
       const isSmDay = smActive && smDays.includes(datesISO[i]);
       const smTag = isSmDay ? ` [STREET MARKETING : équipe piétonne ${smTeamSize}p à ${smCityRaw}]` : '';
       perDayTimesPrompt += `  - ${datesList[i]} : ${mornLabel}, ${aftLabel}${holidayTag}${smTag}\n`;
+    }
+
+    // Nombre total de secteurs à remplir sur la période. Sert à prévenir quand
+    // le pool est trop maigre : le plan reste produit, mais il tournera sur les
+    // mêmes lieux, et autant le dire avant que le client ne l'ouvre.
+    const besoinTotal = perDayTimes.reduce((t, j) =>
+      t + (j.hasMorning ? sectorCount(j.mornStart, j.mornEnd) : 0)
+        + (j.hasAfternoon ? sectorCount(j.aftStart, j.aftEnd) : 0), 0);
+    if (filteredPOIs.length < Math.min(besoinTotal, 8)) {
+      console.warn(`[POI] pool maigre : ${filteredPOIs.length} lieux pour ${besoinTotal} arrêts à couvrir.`);
+      poolMaigre = { trouves: filteredPOIs.length, besoin: besoinTotal };
     }
 
     setProgress('Analyse IA Stratégique...', 60);
@@ -1959,9 +1991,24 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     const toMinCov = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
     for (let idx = 0; idx < data.dailyPlans.length; idx++) {
       const day = data.dailyPlans[idx];
-      if (!day.stops || day.stops.length === 0) continue;
       const t = perDayTimes[idx];
       if (!t) continue;
+
+      // Journée rendue vide par l'IA alors que des créneaux sont déclarés :
+      // on l'amorce avec les meilleurs lieux du pool. Sans cela la journée
+      // sortait blanche sur le PDF, créneaux affichés mais aucun arrêt.
+      if ((!day.stops || day.stops.length === 0) && (t.hasMorning || t.hasAfternoon)) {
+        day.stops = filteredPOIs.slice(0, 2).map(p => ({
+          time: t.hasMorning ? t.mornStart : t.aftStart,
+          locationName: p.name, address: p.address, type: p.type,
+          lat: p.lat, lng: p.lng, source: 'COMPLÉMENT (base OSM)',
+          marketDays: p.marketDays || [],
+        }));
+        if (day.stops.length) {
+          console.warn(`[Couverture] ${day.day} : journée vide amorcée avec ${day.stops.length} lieu(x) du pool.`);
+        }
+      }
+      if (!day.stops || day.stops.length === 0) continue;
 
       // Séparer matin / après-midi (frontière 14:00, cohérent avec le reste du code)
       const split = 14 * 60;
@@ -1970,24 +2017,35 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
       // Double les lieux d'un créneau jusqu'à couvrir tous les secteurs.
       // Jamais les écoles ni les centres équestres (livrés une seule fois).
-      const padSlot = (arr, target) => {
-        if (arr.length === 0 || arr.length >= target) return arr;
-        const pool = arr.filter(s => s.type !== 'school' && s.type !== 'equestrian');
-        if (pool.length === 0) return arr; // rien à dupliquer sans risque
+      // `secours` = les arrêts de l'autre créneau : quand l'IA ne rend que des
+      // arrêts du matin, l'après-midi déclaré restait VIDE dans le plan, faute
+      // de quoi que ce soit à dupliquer. C'est le créneau manquant remonté par
+      // les chauffeurs.
+      const reutilisable = s => s.type !== 'school' && s.type !== 'equestrian';
+      const padSlot = (arr, target, secours = []) => {
+        if (arr.length >= target) return arr;
+        const propres = arr.filter(reutilisable);
+        const source = propres.length ? propres : secours.filter(reutilisable);
+        if (source.length === 0) return arr; // rien à dupliquer sans risque
+        const etiquette = propres.length ? '2e passage' : 'report de créneau';
         let i = 0;
         while (arr.length < target) {
-          arr.push({ ...pool[i % pool.length], source: '2e passage' });
+          arr.push({ ...source[i % source.length], source: etiquette });
           i++;
         }
         return arr;
       };
 
+      // Les deux créneaux se servent l'un de l'autre : on fige donc une copie
+      // du matin avant de le compléter, sinon l'après-midi se remplirait avec
+      // les doublons qu'on vient d'ajouter au matin.
+      const matinInitial = morning.slice();
       if (t.hasMorning) {
-        morning = padSlot(morning, sectorCount(t.mornStart, t.mornEnd));
+        morning = padSlot(morning, sectorCount(t.mornStart, t.mornEnd), afternoon);
         redistributeStops(morning, t.mornStart, t.mornEnd);
       }
       if (t.hasAfternoon) {
-        afternoon = padSlot(afternoon, sectorCount(t.aftStart, t.aftEnd));
+        afternoon = padSlot(afternoon, sectorCount(t.aftStart, t.aftEnd), matinInitial);
         redistributeStops(afternoon, t.aftStart, t.aftEnd);
       }
 
@@ -2215,6 +2273,15 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     generatedData = data;
     renderZoneLandmarks(zoneLandmarks);
     lucide.createIcons();
+
+    if (poolMaigre) {
+      showMessage(
+        `Plan généré avec ${poolMaigre.trouves} lieu(x) seulement pour ${poolMaigre.besoin} arrêts à couvrir : `
+        + `certains secteurs seront repassés plusieurs fois (mention « 2e passage »). `
+        + `Pour plus de variété, élargissez le rayon ou relancez — les serveurs OpenStreetMap répondaient mal.`,
+        'warn'
+      );
+    }
 
     setTimeout(() => {
       el.mapContainer.classList.remove('hidden');
