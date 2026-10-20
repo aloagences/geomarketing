@@ -590,22 +590,107 @@ function perimetreSelection(carreaux) {
   return segments;
 }
 
-/** Dessine la sélection sur la carte du plan généré, en fond discret. */
-function dessinerSelectionINSEE(map) {
-  if (!inseeSelection?.carreaux?.length || !map) return null;
-  const couche = L.layerGroup();
+// ---------------------------------------------------------------------------
+// Page « Potentiel » du PDF
+// ---------------------------------------------------------------------------
 
-  // Voile très léger : il suffit à teinter la zone, la heatmap passe au-dessus.
-  for (const c of inseeSelection.carreaux) {
+let _potentialMap = null;
+
+/**
+ * Carte de présentation client : les zones retenues, colorées par nombre de
+ * ménages. Elle répond à « qu'est-ce que je touche ? », tandis que la carte
+ * topographique répond à « par où passe le véhicule ? » — deux questions
+ * distinctes qui méritaient deux pages plutôt qu'un seul calque surchargé.
+ */
+function drawPotentialMap(origin, radiusKm) {
+  const boite = document.getElementById('potentialMapContainer');
+  if (!boite) return;
+
+  if (!inseeSelection?.carreaux?.length) {
+    boite.classList.add('hidden');
+    return;
+  }
+  boite.classList.remove('hidden');
+
+  const carreaux = inseeSelection.carreaux;
+
+  document.getElementById('potHab').textContent = inseeSelection.totalInd.toLocaleString('fr-FR');
+  document.getElementById('potMen').textContent = inseeSelection.totalMen.toLocaleString('fr-FR');
+
+  // Échelle propre aux carreaux retenus : les quantiles du rayon entier
+  // écraseraient les écarts à l'intérieur de la sélection.
+  const vals = carreaux.map(c => c.men).filter(v => v > 0).sort((a, b) => a - b);
+  const q = p => vals.length ? vals[Math.min(vals.length - 1, Math.floor(p * vals.length))] : 0;
+  const seuils = [q(0.2), q(0.4), q(0.6), q(0.8), q(0.95)];
+  const couleur = (v) => {
+    for (let i = 0; i < seuils.length; i++) if (v <= seuils[i]) return INSEE_PALETTE[i];
+    return INSEE_PALETTE[INSEE_PALETTE.length - 1];
+  };
+
+  if (!_potentialMap) {
+    _potentialMap = L.map('potentialMap', { preferCanvas: true, zoomControl: false, attributionControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap · Carreaux INSEE Filosofi / IGN',
+      maxZoom: 19, subdomains: 'abc',
+    }).addTo(_potentialMap);
+  } else {
+    _potentialMap.eachLayer(l => {
+      if (l instanceof L.Polygon || l instanceof L.Polyline || l instanceof L.Circle || l instanceof L.Marker) {
+        _potentialMap.removeLayer(l);
+      }
+    });
+  }
+  _potentialMap.invalidateSize();
+
+  const bornes = L.latLngBounds([]);
+  for (const c of carreaux) {
     L.polygon(c.ring, {
-      stroke: false, fillColor: '#10b981', fillOpacity: 0.10, interactive: false,
-    }).addTo(couche);
+      stroke: false, fillColor: couleur(c.men), fillOpacity: 0.82, interactive: false,
+    }).addTo(_potentialMap);
+    bornes.extend([c.lat, c.lng]);
   }
 
-  L.polyline(perimetreSelection(inseeSelection.carreaux), {
-    color: '#047857', weight: 1.8, opacity: 0.85, interactive: false,
-  }).addTo(couche);
+  L.polyline(perimetreSelection(carreaux), {
+    color: '#0E2C59', weight: 1.6, opacity: 0.9, interactive: false,
+  }).addTo(_potentialMap);
 
-  couche.addTo(map);
-  return couche;
+  L.circle([origin.lat, origin.lng], {
+    radius: radiusKm * 1000, color: '#0E2C59', weight: 1.5, dashArray: '6 6',
+    fill: false, interactive: false,
+  }).addTo(_potentialMap);
+
+  L.marker([origin.lat, origin.lng], {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'custom-div-icon',
+      html: '<div style="background:#0E2C59;width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(0,0,0,0.4)"></div>',
+      iconSize: [18, 18], iconAnchor: [9, 9],
+    }),
+  }).addTo(_potentialMap);
+
+  _potentialMap.fitBounds(bornes.pad(0.08));
+
+  // Légende, en ménages puisque c'est l'unité de la couleur ici.
+  const brn = [0, ...seuils];
+  document.getElementById('potLegende').innerHTML =
+    `<span class="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 mr-1">Ménages par carreau de 200 m</span>`
+    + INSEE_PALETTE.map((col, i) => {
+        const haut = seuils[i];
+        const lab = haut === undefined ? `${brn[i]}+` : (brn[i] === haut ? `${haut}` : `${brn[i]}–${haut}`);
+        return `<span class="flex items-center gap-1.5">
+          <span style="background:${col}" class="inline-block w-5 h-3 rounded-sm border border-gray-200"></span>
+          <span class="text-[11px] text-gray-600">${lab}</span></span>`;
+      }).join('');
+
+  // Secteurs : ce que le client retient, commune par commune.
+  document.getElementById('potSecteurs').innerHTML = inseeSelection.secteurs
+    .slice(0, 8)
+    .map(s => `
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+        <p class="text-[11px] font-extrabold text-[#0E2C59] truncate leading-tight">${sanitize(s.commune || 'Secteur')}</p>
+        <p class="text-[10px] text-gray-500 leading-tight">
+          <span class="font-bold text-emerald-700">${s.men.toLocaleString('fr-FR')}</span> ménages ·
+          ${s.ind.toLocaleString('fr-FR')} hab.
+        </p>
+      </div>`).join('');
 }

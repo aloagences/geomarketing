@@ -81,20 +81,25 @@ async function generateFullPDF(data, inputRefs) {
     });
     pdf.addImage(coverCanvas.toDataURL('image/jpeg', 1.0), 'JPEG', 0, 0, W, H);
 
-    // 2. Reach
+    // 2. Potentiel de la zone ciblée. Placé juste après la couverture : c'est
+    //    ce que le client achète (habitants et ménages touchés), avant le
+    //    détail opérationnel du tracé.
+    await captureElement('potentialMapContainer', false);
+
+    // 3. Reach
     await captureElement('reachEstimationContainer', true);
 
-    // 3. Carte (sans header)
+    // 4. Carte du tracé (sans header)
     const mapHeader = document.querySelector('#mapContainerWrapper .flex-col');
     const savedDisplay = mapHeader?.style.display;
     if (mapHeader) mapHeader.style.display = 'none';
     await captureElement('mapContainerWrapper', false);
     if (mapHeader) mapHeader.style.display = savedDisplay;
 
-    // 3bis. Fiche de repérage (lieux importants de la zone)
+    // 5. Fiche de repérage (lieux importants de la zone)
     await captureElement('zoneLandmarksContainer', false);
 
-    // 4. Itinéraires. Street Marketing et centres équestres ont chacun leur
+    // 6. Itinéraires. Street Marketing et centres équestres ont chacun leur
     //    page : trop denses pour tenir lisiblement sous les arrêts véhicule.
     if (data?.dailyPlans) {
       for (let i = 0; i < data.dailyPlans.length; i++) {
@@ -104,7 +109,7 @@ async function generateFullPDF(data, inputRefs) {
       }
     }
 
-    // 5. Émargement
+    // 7. Émargement
     if (data?.attendance?.length > 0) {
       const grid = document.getElementById('attendanceGrid');
       const temp = document.createElement('div');
@@ -148,7 +153,7 @@ async function generateFullPDF(data, inputRefs) {
       document.body.removeChild(temp);
     }
 
-    // 6. Page satisfaction finale
+    // 8. Page satisfaction finale
     const satEl = document.getElementById('pdfSatisfactionPage');
     if (satEl) {
       const satCanvas = await html2canvas(satEl, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });

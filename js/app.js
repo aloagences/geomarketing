@@ -34,6 +34,7 @@ function initDomRefs() {
   el.displayBrand = document.getElementById('displayBrand');
   el.dateSpan = document.getElementById('generationDate');
   el.mapContainer = document.getElementById('mapContainerWrapper');
+  el.potentialMap = document.getElementById('potentialMapContainer');
   el.zoneLandmarks = document.getElementById('zoneLandmarksContainer');
   el.zoneLandmarksGrid = document.getElementById('zoneLandmarksGrid');
   el.mapStats = document.getElementById('mapStats');
@@ -834,8 +835,9 @@ async function handleGenerate() {
     setProgress('Initialisation...', 5);
 
     // Reset UI
-    ['mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard', 'reachEstimationContainer',
-     'officialBadges', 'badgeSiren', 'badgeInsee', 'badgePop', 'analysisCard'
+    ['potentialMap', 'mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard',
+     'reachEstimationContainer', 'officialBadges', 'badgeSiren', 'badgeInsee',
+     'badgePop', 'analysisCard'
     ].forEach(id => el[id]?.classList.add('hidden'));
 
     // --- Géocodage ---
@@ -2215,6 +2217,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       el.mapContainer.classList.remove('hidden');
 
       setTimeout(() => {
+        // Le potentiel d'abord : c'est la zone visée, dessinée avant le tracé
+        // qui en découle.
+        drawPotentialMap(originObj, radius);
         drawMap(data, originObj, radius);
 
         // Calcul Reach

@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.9.3 — 19 octobre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.10 — 20 octobre 2026</span>
       </div>
     </header>
 
@@ -522,6 +522,33 @@
         </div>
 
         <!-- Carte Leaflet -->
+        <!-- Potentiel de la zone ciblée (carreaux INSEE sélectionnés) -->
+        <div id="potentialMapContainer" class="card overflow-hidden z-0 relative mt-8 hidden border-0 shadow-lg bg-white">
+          <div class="bg-[#0E2C59] text-white px-8 py-4 flex justify-between items-end gap-6">
+            <div class="flex flex-col">
+              <span class="text-xs text-blue-300 font-semibold uppercase tracking-wider mb-1">Potentiel de votre campagne</span>
+              <h3 class="font-bold text-xl flex items-center">
+                <i data-lucide="users" class="w-5 h-5 mr-2 text-white"></i> Habitants &amp; ménages de la zone ciblée
+              </h3>
+            </div>
+            <div class="flex items-end gap-7 flex-shrink-0">
+              <div class="text-right">
+                <p class="font-extrabold text-3xl leading-none" id="potHab">—</p>
+                <p class="text-blue-300 text-[10px] font-bold uppercase tracking-widest mt-1">habitants</p>
+              </div>
+              <div class="text-right">
+                <p class="font-extrabold text-3xl leading-none text-emerald-300" id="potMen">—</p>
+                <p class="text-blue-300 text-[10px] font-bold uppercase tracking-widest mt-1">ménages</p>
+              </div>
+            </div>
+          </div>
+          <!-- Hauteur calée pour que la carte entière tienne sur une A4
+               paysage sans être réduite au point de devenir illisible. -->
+          <div id="potentialMap" class="w-full h-[440px] z-0 bg-gray-100"></div>
+          <div class="px-8 pt-3 pb-1.5 flex items-center flex-wrap gap-2.5" id="potLegende"></div>
+          <div class="px-8 pb-4 grid grid-cols-2 md:grid-cols-4 gap-2" id="potSecteurs"></div>
+        </div>
+
         <div id="mapContainerWrapper" class="card overflow-hidden z-0 relative mt-8 hidden border-0 shadow-lg bg-white">
           <div class="bg-[#0E2C59] text-white px-8 py-4 flex justify-between items-center">
             <div class="flex flex-col">
@@ -668,11 +695,11 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.9.3"></script>
-  <script src="js/api.js?v=5.9.3"></script>
-  <script src="js/insee.js?v=5.9.3"></script>
-  <script src="js/map.js?v=5.9.3"></script>
-  <script src="js/export.js?v=5.9.3"></script>
-  <script src="js/app.js?v=5.9.3"></script>
+  <script src="js/utils.js?v=5.10"></script>
+  <script src="js/api.js?v=5.10"></script>
+  <script src="js/insee.js?v=5.10"></script>
+  <script src="js/map.js?v=5.10"></script>
+  <script src="js/export.js?v=5.10"></script>
+  <script src="js/app.js?v=5.10"></script>
 </body>
 </html>

@@ -5,7 +5,6 @@
 let mapInstance = null;
 let markersLayer = null;
 let heatLayer = null;
-let inseeLayer = null;
 
 function drawMap(data, origin, radiusKm) {
   if (!mapInstance) {
@@ -24,14 +23,14 @@ function drawMap(data, origin, radiusKm) {
   } else {
     markersLayer.clearLayers();
     if (heatLayer) mapInstance.removeLayer(heatLayer);
-    if (inseeLayer) mapInstance.removeLayer(inseeLayer);
     mapInstance.setView([origin.lat, origin.lng], 13);
   }
 
   mapInstance.invalidateSize();
 
-  // Zones INSEE validées : posées avant les marqueurs pour rester en fond.
-  inseeLayer = dessinerSelectionINSEE(mapInstance);
+  // Pas de carreaux INSEE ici : le potentiel a sa propre page en tête de PDF.
+  // Cette carte-ci montre le résultat du tracé, sur lequel sont calculés les
+  // indicateurs ; les mélanger rendait les deux lectures confuses.
 
   // Marqueur QG
   const qgIcon = L.divIcon({
