@@ -1243,10 +1243,13 @@ async function handleGenerate() {
     // Secteurs INSEE : on donne à l'IA la population réelle de chaque zone
     // retenue, pour qu'elle hiérarchise les journées sur le potentiel mesuré
     // et non sur l'ordre de saisie.
-    const inseeInstruction = inseeSecteurs.length > 0
-      ? `ZONES INSEE SÉLECTIONNÉES PAR LE CLIENT (${inseeSelection.totalInd} habitants au total) — ce sont LES zones à couvrir en priorité, par ordre de potentiel : `
-        + inseeSecteurs.map((s, i) =>
-            `[${i + 1}] ${s.commune || 'secteur'} (${s.ind} hab., ${s.men} ménages, centre ${s.lat.toFixed(4)},${s.lng.toFixed(4)})`
+    // Regroupées par commune : une ville éclatée en trois blocs occupait trois
+    // places du classement et en évinçait d'autres.
+    const inseeCommunes = (inseeSelection?.communes || []).slice(0, 6);
+    const inseeInstruction = inseeCommunes.length > 0
+      ? `ZONES INSEE SÉLECTIONNÉES PAR LE CLIENT (${inseeSelection.totalInd} habitants, ${inseeSelection.totalMen} ménages au total) — ce sont LES zones à couvrir en priorité, par ordre de potentiel : `
+        + inseeCommunes.map((s, i) =>
+            `[${i + 1}] ${s.commune} (${s.ind} hab., ${s.men} ménages, centre ${s.lat.toFixed(4)},${s.lng.toFixed(4)})`
           ).join(' ; ')
         + `. Au moins 60% des arrêts doivent se trouver à moins de 1 km du centre d'une de ces zones, et chaque zone du top 3 doit être visitée au moins une fois sur la période.`
       : '';

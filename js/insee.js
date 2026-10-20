@@ -251,6 +251,32 @@ function clustersINSEE(carreaux) {
   return groupes;
 }
 
+/**
+ * Totaux par commune. Une même ville ressort souvent en plusieurs blocs
+ * séparés (un centre-bourg, un lotissement, une zone pavillonnaire) : la
+ * fiche client affichait alors « Mallemort » trois fois avec des totaux
+ * partiels. Ici une commune = une ligne, avec tous ses habitants et ménages.
+ */
+function communesINSEE(carreaux) {
+  const parNom = new Map();
+  for (const c of carreaux) {
+    const nom = c.commune || 'Secteur';
+    if (!parNom.has(nom)) parNom.set(nom, { commune: nom, ind: 0, men: 0, nbCarreaux: 0, _sLat: 0, _sLng: 0, _p: 0 });
+    const g = parNom.get(nom);
+    g.ind += c.ind;
+    g.men += c.men;
+    g.nbCarreaux++;
+    // Centre pondéré par la population : il tombe sur le bourg, pas au milieu
+    // géométrique entre deux hameaux éloignés.
+    const p = Math.max(c.ind, 1);
+    g._sLat += c.lat * p; g._sLng += c.lng * p; g._p += p;
+  }
+  return [...parNom.values()]
+    .map(g => ({ commune: g.commune, ind: g.ind, men: g.men, nbCarreaux: g.nbCarreaux,
+                 lat: g._sLat / g._p, lng: g._sLng / g._p }))
+    .sort((a, b) => b.ind - a.ind);
+}
+
 // ---------------------------------------------------------------------------
 // Modale de sélection
 // ---------------------------------------------------------------------------
@@ -522,7 +548,10 @@ function initInseeUI() {
     if (!choisis.length) return;
     inseeSelection = {
       carreaux: choisis,
+      // `secteurs` = blocs contigus, utilisés pour aller chercher les POI au
+      // bon endroit. `communes` = la même sélection vue par le client.
       secteurs: clustersINSEE(choisis),
+      communes: communesINSEE(choisis),
       totalInd: choisis.reduce((s, c) => s + c.ind, 0),
       totalMen: choisis.reduce((s, c) => s + c.men, 0),
       origin: _inseeOrigine,
@@ -542,13 +571,14 @@ function renderInseeSummary() {
     return;
   }
   const s = inseeSelection;
-  const lignes = s.secteurs.slice(0, 5).map(g => `
+  const communes = s.communes || [];
+  const lignes = communes.slice(0, 5).map(g => `
     <div class="flex items-center justify-between gap-2 text-xs py-0.5">
-      <span class="font-semibold text-emerald-900 truncate">${sanitize(g.commune || 'Secteur')} · ${g.nbCarreaux} carreau${g.nbCarreaux > 1 ? 'x' : ''}</span>
-      <span class="font-mono font-bold text-emerald-700 flex-shrink-0">${g.ind.toLocaleString('fr-FR')} hab.</span>
+      <span class="font-semibold text-emerald-900 truncate">${sanitize(g.commune)} · ${g.nbCarreaux} carreau${g.nbCarreaux > 1 ? 'x' : ''}</span>
+      <span class="font-mono font-bold text-emerald-700 flex-shrink-0">${g.men.toLocaleString('fr-FR')} mén.</span>
     </div>`).join('');
-  const reste = s.secteurs.length > 5
-    ? `<p class="text-[11px] text-emerald-700/70 italic mt-1">+ ${s.secteurs.length - 5} autre(s) secteur(s)</p>` : '';
+  const reste = communes.length > 5
+    ? `<p class="text-[11px] text-emerald-700/70 italic mt-1">+ ${communes.length - 5} autre(s) commune(s)</p>` : '';
 
   box.innerHTML = `
     <div class="flex items-center justify-between mb-1.5">
@@ -642,12 +672,10 @@ function drawPotentialMap(origin, radiusKm) {
   }
   _potentialMap.invalidateSize();
 
-  const bornes = L.latLngBounds([]);
   for (const c of carreaux) {
     L.polygon(c.ring, {
       stroke: false, fillColor: couleur(c.men), fillOpacity: 0.82, interactive: false,
     }).addTo(_potentialMap);
-    bornes.extend([c.lat, c.lng]);
   }
 
   L.polyline(perimetreSelection(carreaux), {
@@ -668,7 +696,17 @@ function drawPotentialMap(origin, radiusKm) {
     }),
   }).addTo(_potentialMap);
 
-  _potentialMap.fitBounds(bornes.pad(0.08));
+  // Cadrage sur le rayon de campagne, pas sur les carreaux : ajusté aux seuls
+  // carreaux, le cercle débordait des deux côtés et le client ne voyait plus
+  // l'étendue réelle de sa zone. Emprise calculée à la main : `getBounds()`
+  // d'un L.Circle exige une projection déjà établie, ce qui n'est pas le cas
+  // tant que le conteneur vient d'être démasqué.
+  const dLat = radiusKm / 111;
+  const dLng = radiusKm / (111 * Math.cos(origin.lat * Math.PI / 180));
+  _potentialMap.fitBounds([
+    [origin.lat - dLat, origin.lng - dLng],
+    [origin.lat + dLat, origin.lng + dLng],
+  ], { padding: [6, 6] });
 
   // Légende, en ménages puisque c'est l'unité de la couleur ici.
   const brn = [0, ...seuils];
@@ -682,15 +720,34 @@ function drawPotentialMap(origin, radiusKm) {
           <span class="text-[11px] text-gray-600">${lab}</span></span>`;
       }).join('');
 
-  // Secteurs : ce que le client retient, commune par commune.
-  document.getElementById('potSecteurs').innerHTML = inseeSelection.secteurs
-    .slice(0, 8)
+  // Une ligne par commune. Pas de `truncate` ni d'interlignage serré : avec
+  // overflow:hidden, html2canvas rognait le haut des majuscules à l'export,
+  // et les noms de villes ressortaient coupés sur le PDF.
+  // 8 cartouches au maximum, soit exactement deux rangées de quatre : une
+  // troisième rangée ferait dépasser la page et imposerait une réduction à
+  // l'export. Au-delà de 8 communes, les dernières sont cumulées.
+  const communes = inseeSelection.communes || [];
+  const detaillees = communes.length > 8 ? 7 : 8;
+  document.getElementById('potSecteurs').innerHTML = communes
+    .slice(0, detaillees)
     .map(s => `
-      <div class="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
-        <p class="text-[11px] font-extrabold text-[#0E2C59] truncate leading-tight">${sanitize(s.commune || 'Secteur')}</p>
-        <p class="text-[10px] text-gray-500 leading-tight">
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
+        <p class="text-[11px] font-extrabold text-[#0E2C59] leading-5 break-words">${sanitize(s.commune)}</p>
+        <p class="text-[10px] text-gray-500 leading-4">
           <span class="font-bold text-emerald-700">${s.men.toLocaleString('fr-FR')}</span> ménages ·
-          ${s.ind.toLocaleString('fr-FR')} hab.
+          <span class="font-bold text-[#0E2C59]">${s.ind.toLocaleString('fr-FR')}</span> hab.
         </p>
       </div>`).join('');
+
+  const reste = communes.slice(detaillees);
+  if (reste.length) {
+    document.getElementById('potSecteurs').insertAdjacentHTML('beforeend', `
+      <div class="bg-gray-50 border border-dashed border-gray-300 rounded-lg px-2.5 py-2">
+        <p class="text-[11px] font-extrabold text-gray-500 leading-5">+ ${reste.length} autre(s) commune(s)</p>
+        <p class="text-[10px] text-gray-500 leading-4">
+          <span class="font-bold text-emerald-700">${reste.reduce((t, s) => t + s.men, 0).toLocaleString('fr-FR')}</span> ménages ·
+          <span class="font-bold text-[#0E2C59]">${reste.reduce((t, s) => t + s.ind, 0).toLocaleString('fr-FR')}</span> hab.
+        </p>
+      </div>`);
+  }
 }

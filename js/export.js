@@ -89,12 +89,9 @@ async function generateFullPDF(data, inputRefs) {
     // 3. Reach
     await captureElement('reachEstimationContainer', true);
 
-    // 4. Carte du tracé (sans header)
-    const mapHeader = document.querySelector('#mapContainerWrapper .flex-col');
-    const savedDisplay = mapHeader?.style.display;
-    if (mapHeader) mapHeader.style.display = 'none';
+    // 4. Carte du tracé. Le bandeau est conservé : sans lui, la page arrivait
+    //    dans le PDF sans aucun titre, avec le seul badge « Distances OK ».
     await captureElement('mapContainerWrapper', false);
-    if (mapHeader) mapHeader.style.display = savedDisplay;
 
     // 5. Fiche de repérage (lieux importants de la zone)
     await captureElement('zoneLandmarksContainer', false);
