@@ -35,6 +35,19 @@ body {
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
+/* Nombre d'habitants écrit sur un carreau INSEE. Le liseré blanc garde le
+   chiffre lisible aussi bien sur un carreau bleu pâle que sur le bleu nuit. */
+.insee-nombre {
+  font: 700 11px/14px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #0f172a;
+  text-align: center;
+  text-shadow:
+     0 0 3px #fff,  0 1px 2px #fff, 0 -1px 2px #fff,
+     1px 0 2px #fff, -1px 0 2px #fff;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .alert-box {
   display: none;
   padding: 1rem;

@@ -294,6 +294,35 @@ function _peindreCarreau(c, actif) {
   _inseeCouches.get(c.cle)?.setStyle(_styleCarreau(c));
 }
 
+// Étiquettes chiffrées sur les carreaux : le nombre de MÉNAGES, c'est-à-dire
+// de boîtes aux lettres, la seule unité qui compte pour un tractage.
+// On ne les pose qu'à partir du zoom 15 et seulement sur la partie visible :
+// à l'échelle du rayon entier, 2 000 nombres seraient illisibles et feraient
+// ramer la carte.
+const INSEE_ZOOM_ETIQUETTES = 15;
+const INSEE_MAX_ETIQUETTES = 500;
+let _inseeEtiquettes = null;
+
+function _majEtiquettes() {
+  if (!_inseeMap) return;
+  if (!_inseeEtiquettes) _inseeEtiquettes = L.layerGroup().addTo(_inseeMap);
+  _inseeEtiquettes.clearLayers();
+
+  if (_inseeMap.getZoom() < INSEE_ZOOM_ETIQUETTES) return;
+
+  const vue = _inseeMap.getBounds();
+  let poses = 0;
+  for (const c of _inseeCarreaux) {
+    if (c.men <= 0 || !vue.contains([c.lat, c.lng])) continue;
+    if (++poses > INSEE_MAX_ETIQUETTES) break;
+    L.marker([c.lat, c.lng], {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({ className: 'insee-nombre', html: String(c.men), iconSize: [40, 14], iconAnchor: [20, 7] }),
+    }).addTo(_inseeEtiquettes);
+  }
+}
+
 function _rendreLegendeINSEE() {
   const bornes = [0, ..._inseeSeuils];
   const cases = INSEE_PALETTE.map((couleur, i) => {
@@ -305,7 +334,12 @@ function _rendreLegendeINSEE() {
       <span class="text-[11px] text-gray-600">${label}</span>
     </div>`;
   }).join('');
-  _inseeEl('inseeLegende').innerHTML = cases;
+  // Couleur et chiffre ne disent pas la même chose : sans cette mention, un
+  // carreau foncé portant « 29 » laisserait croire à une incohérence.
+  _inseeEl('inseeLegende').innerHTML =
+    `<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-1">Habitants</span>`
+    + cases
+    + `<span class="text-[10px] text-gray-400 ml-2 pl-2 border-l border-gray-200">chiffres = ménages</span>`;
 }
 
 /**
@@ -377,6 +411,8 @@ async function openInseeMap(origin, radiusKm) {
 
   _inseeMap.off('mousedown', _pinceauDebut).on('mousedown', _pinceauDebut);
   _inseeMap.off('mousemove', _pinceauDeplace).on('mousemove', _pinceauDeplace);
+  _inseeMap.off('zoomend moveend', _majEtiquettes).on('zoomend moveend', _majEtiquettes);
+  _majEtiquettes();
 
   L.circle([origin.lat, origin.lng], {
     radius: radiusKm * 1000, color: '#0E2C59', weight: 2, dashArray: '6 6', fill: false,
