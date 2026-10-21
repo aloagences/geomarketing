@@ -299,6 +299,65 @@ function streetLabel(address) {
 }
 
 /**
+ * Sélection des lieux proposés à l'IA.
+ *
+ * Sans zones INSEE, on garde les plus proches du dépôt. Avec des zones, les
+ * places sont réparties entre les communes retenues au prorata de leurs
+ * ménages. Trier par distance revenait sinon à ne proposer que les abords
+ * immédiats du dépôt : sur une sélection Cannes–Vallauris–Antibes, les
+ * cinquante lieux envoyés tenaient tous dans un rayon de trois kilomètres et
+ * le camion ne sortait jamais de sa commune, alors qu'Antibes pesait à elle
+ * seule 27 000 ménages de la zone payée.
+ */
+function choisirMenuPOIs(pois, max = 50) {
+  const communes = inseeSelection?.communes || [];
+  if (!communes.length) return pois.slice(0, max);
+
+  const totalMen = communes.reduce((t, c) => t + c.men, 0) || 1;
+  const paniers = new Map(communes.map(c => [c.commune, []]));
+  const reste = [];
+
+  for (const p of pois) {
+    let proche = null, dMin = Infinity;
+    for (const c of communes) {
+      const d = calculateDistance(p.lat, p.lng, c.lat, c.lng);
+      if (d < dMin) { dMin = d; proche = c; }
+    }
+    // Au-delà de 5 km du centre de toute commune retenue, le lieu n'appartient
+    // vraiment à aucun secteur : il ne servira que de bouche-trou.
+    if (proche && dMin <= 5) paniers.get(proche.commune).push(p);
+    else reste.push(p);
+  }
+
+  // Dans chaque commune, les lieux les plus fréquentés d'abord.
+  for (const panier of paniers.values()) {
+    panier.sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
+  }
+
+  const menu = [];
+  for (const c of communes) {
+    const quota = Math.max(1, Math.round((c.men / totalMen) * max));
+    menu.push(...paniers.get(c.commune).slice(0, quota));
+  }
+
+  // Certaines communes n'ont pas assez de lieux pour remplir leur quota :
+  // on complète avec ce qui reste plutôt que d'envoyer un menu incomplet.
+  if (menu.length < max) {
+    const pris = new Set(menu);
+    for (const p of [...pois, ...reste]) {
+      if (menu.length >= max) break;
+      if (!pris.has(p)) { menu.push(p); pris.add(p); }
+    }
+  }
+
+  const repartition = communes.map(c =>
+    `${c.commune} ${menu.filter(p => paniers.get(c.commune).includes(p)).length}`
+  ).join(', ');
+  console.log(`[Menu IA] ${menu.length} lieux répartis — ${repartition}.`);
+  return menu.slice(0, max);
+}
+
+/**
  * Horaires OSM rendus lisibles pour un chauffeur.
  * `opening_hours` suit une grammaire riche qu'on ne cherche pas à interpréter :
  * on se contente d'en extraire la première plage horaire, qui suffit à savoir
@@ -1314,7 +1373,7 @@ async function handleGenerate() {
     // et limité à 50 POI pour accélérer — moins de tokens = génération rapide.
     // `insee: 1` marque les lieux situés dans une zone validée par le client :
     // sans ce drapeau, l'IA n'aurait aucun moyen d'appliquer le quota de 60%.
-    const slimPOIs = filteredPOIs.slice(0, 50).map(p => ({
+    const slimPOIs = choisirMenuPOIs(filteredPOIs, 50).map(p => ({
       name: p.name, address: p.address, type: p.type,
       lat: p.lat, lng: p.lng, dist: p.distance,
       ...(dansSelectionINSEE(p.lat, p.lng) ? { insee: 1 } : {}),
@@ -1479,11 +1538,22 @@ async function handleGenerate() {
       ? `VACANCES SCOLAIRES en cours : ${schoolHolidays.map(h => h.description || `${h.start} au ${h.end}`).join(', ')}. Les jours marqués [VACANCES SCOLAIRES] ne doivent avoir AUCUN arrêt école.`
       : '';
 
+    // Sans zones choisies, on reste près du dépôt. Avec des zones, cette règle
+    // les contredisait frontalement : « 60% des arrêts à moins de 2 km de
+    // Vallauris » clouait le camion dans sa commune alors que la sélection
+    // couvrait Cannes, Le Cannet, Vallauris et Antibes sur quinze kilomètres.
+    const regleProximite = inseeCommunes.length > 0
+      ? `COUVERTURE: répartis les arrêts entre TOUTES les zones listées ci-dessus, `
+        + `proportionnellement à leur nombre de ménages. Consacre une journée entière ou `
+        + `une demi-journée à chaque zone importante plutôt que de revenir chaque jour `
+        + `au même endroit : le véhicule doit avoir couvert toute la zone en fin de période.`
+      : `PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.`;
+
     const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
 RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
 ${exclusionInstruction}
 STRATÉGIE CARDINALE: Attribue à chaque jour une direction dominante (Nord, Sud, Est, Ouest).
-PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.
+${regleProximite}
 REPÈRES PREMIUM: Les opticiens et boulangeries occupent les meilleurs emplacements en cœur de ville — privilégie-les comme points d'ancrage centraux quand ils figurent dans la BASE OSM.
 JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une par jour, dans l'ordre chronologique. Même les jours sans créneau doivent avoir une entrée avec "stops":[] vide.
 HORAIRES: environ 1 arrêt par heure de créneau actif (ex. 10:00-13:00 → 3 arrêts). ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
@@ -1846,6 +1916,34 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         .filter(p => p.lat && p.lng && dansSelectionINSEE(p.lat, p.lng))
         .sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
 
+      // Commune de rattachement de chaque lieu et de chaque arrêt, pour que le
+      // remplacement serve la commune la moins couverte. Sans cela la passe
+      // puisait toujours dans la mieux notée et accentuait la concentration
+      // au lieu de la corriger.
+      const communesZone = inseeSelection.communes || [];
+      const communeDe = (lat, lng) => {
+        let nom = null, dMin = Infinity;
+        for (const c of communesZone) {
+          const d = calculateDistance(lat, lng, c.lat, c.lng);
+          if (d < dMin) { dMin = d; nom = c.commune; }
+        }
+        return nom;
+      };
+      const compte = new Map(communesZone.map(c => [c.commune, 0]));
+      for (const day of data.dailyPlans) {
+        for (const s of (day.stops || [])) {
+          if (!s.lat || !s.lng) continue;
+          const n = communeDe(s.lat, s.lng);
+          if (n) compte.set(n, (compte.get(n) || 0) + 1);
+        }
+      }
+      // Objectif de chaque commune, au prorata de ses ménages.
+      const totalMenZone = communesZone.reduce((t, c) => t + c.men, 0) || 1;
+      const arretsTotal = data.dailyPlans.reduce((t, d) => t + (d.stops?.length || 0), 0);
+      const objectif = new Map(communesZone.map(c =>
+        [c.commune, (c.men / totalMenZone) * arretsTotal]));
+      const deficit = (nom) => (objectif.get(nom) || 0) - (compte.get(nom) || 0);
+
       let replaces = 0, restesHorsZone = 0;
 
       for (const day of data.dailyPlans) {
@@ -1859,8 +1957,24 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (s.type === 'equestrian' || s.type === 'competitor') continue;
           if (!horsZone(s)) continue;
 
-          const remplacant = poolZone.find(p => !prisCeJour.has(p.name) && canUse(p.name));
-          if (!remplacant) { restesHorsZone++; continue; }
+          // Parmi les candidats disponibles, celui dont la commune accuse le
+          // plus gros retard sur son objectif ; à égalité, le mieux noté.
+          const dispos = poolZone.filter(p => !prisCeJour.has(p.name) && canUse(p.name));
+          if (!dispos.length) { restesHorsZone++; continue; }
+          const remplacant = dispos.reduce((meilleur, p) => {
+            const dp = deficit(communeDe(p.lat, p.lng));
+            const dm = deficit(communeDe(meilleur.lat, meilleur.lng));
+            if (dp > dm + 0.5) return p;
+            if (dm > dp + 0.5) return meilleur;
+            return (p.publicScore || 1) > (meilleur.publicScore || 1) ? p : meilleur;
+          }, dispos[0]);
+
+          // Mise à jour des compteurs : la commune quittée perd un arrêt,
+          // celle rejointe en gagne un.
+          const ancienne = communeDe(s.lat, s.lng);
+          if (ancienne) compte.set(ancienne, Math.max(0, (compte.get(ancienne) || 0) - 1));
+          const nouvelle = communeDe(remplacant.lat, remplacant.lng);
+          if (nouvelle) compte.set(nouvelle, (compte.get(nouvelle) || 0) + 1);
 
           prisCeJour.delete(s.locationName);
           Object.assign(s, {
