@@ -58,8 +58,10 @@ async function fetchCarreauxINSEE(lat, lng, radiusKm) {
     BBOX: `${bbox},CRS:84`,
   });
 
+  // 30 s : une grande ville dense renvoie plusieurs milliers de carreaux
+  // (3 089 sur Nice en rayon 10 km) et 20 s suffisaient tout juste.
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
+  const timer = setTimeout(() => ctrl.abort(), 30000);
   let data;
   try {
     const res = await fetch(`${INSEE_WFS}?${params}`, { signal: ctrl.signal });

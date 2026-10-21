@@ -16,6 +16,9 @@ let poolMaigre = null;
 // Vrai quand le plan repose sur la fiche de repérage ou les centres INSEE,
 // la requête principale OpenStreetMap n'ayant rien ramené.
 let poolDeSecours = false;
+// Renseigné quand des arrêts n'ont pas pu être ramenés dans les carreaux
+// sélectionnés faute de lieux disponibles à l'intérieur.
+let inseeHorsZone = null;
 
 function initDomRefs() {
   el.form = document.getElementById('clientForm');
@@ -845,6 +848,7 @@ async function handleGenerate() {
     // Reset UI
     poolMaigre = null;
     poolDeSecours = false;
+    inseeHorsZone = null;
     ['potentialMap', 'mapContainer', 'zoneLandmarks', 'planCard', 'attendanceCard',
      'reachEstimationContainer', 'officialBadges', 'badgeSiren', 'badgeInsee',
      'badgePop', 'analysisCard'
@@ -1311,7 +1315,7 @@ async function handleGenerate() {
         + inseeCommunes.map((s, i) =>
             `[${i + 1}] ${s.commune} (${s.ind} hab., ${s.men} ménages, centre ${s.lat.toFixed(4)},${s.lng.toFixed(4)})`
           ).join(' ; ')
-        + `. Au moins 60% des arrêts doivent se trouver à moins de 1 km du centre d'une de ces zones, et chaque zone du top 3 doit être visitée au moins une fois sur la période.`
+        + `. RÈGLE ABSOLUE : n'utilise QUE des lieux marqués "insee":1 dans la BASE OSM tant qu'il en reste de disponibles — ce sont les seuls situés dans les zones payées par le client. Un lieu sans ce marqueur n'est admis que si tous les lieux marqués sont déjà utilisés. Chaque zone du top 3 doit être visitée au moins une fois sur la période.`
       : '';
 
     const exclusionInstruction = [
@@ -1647,11 +1651,15 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             filter(p) && (isSchoolDay || p.type !== 'school')
           );
 
-          const inPriority = (p) => priorityList.length > 0 &&
+          // Une sélection INSEE vaut zone prioritaire au même titre qu'un nom
+          // saisi : sans cela, choisir ses zones sur la carte n'avait aucun
+          // effet sur le choix des arrêts de repli.
+          const zonesDefinies = priorityList.length > 0 || inseeSelection?.carreaux?.length > 0;
+          const inPriority = (p) => zonesDefinies &&
             inPriorityZone(p.name, p.address, p.lat, p.lng, p._priorityZone);
 
           // 0. Zone prioritaire + type utile — en tête absolue
-          let idx = priorityList.length > 0
+          let idx = zonesDefinies
             ? findFallback(p => inPriority(p) && USEFUL_TYPES.includes(p.type) && canUse(p.name) && !usedThisDay.has(p.name))
             : -1;
           // 1. Transport public (arrêt bus/tram/gare) — toujours trouvable
@@ -1784,6 +1792,58 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           usedNames.add(candidate.name);
           console.log(`[Priorité] ${day.day} zone "${priorityList[zi]}" → ${candidate.name} (${distKmPriority(originObj.lat, originObj.lng, candidate.lat, candidate.lng).toFixed(1)}km)`);
         }
+      }
+    }
+
+    // --- ENFORCEMENT ZONES INSEE : ramener le tracé dans les carreaux choisis ---
+    // La sélection n'était jusqu'ici qu'une consigne dans le prompt, que l'IA
+    // pouvait ignorer — et elle l'ignorait : sur Nice, des zones côtières
+    // étaient sélectionnées et les arrêts partaient dans les collines. On
+    // remplace désormais chaque arrêt hors zone par un lieu réel situé dans la
+    // sélection, tant qu'il en reste de disponibles.
+    if (inseeSelection?.carreaux?.length) {
+      const horsZone = (s) => !(s?.lat && s?.lng && dansSelectionINSEE(s.lat, s.lng));
+
+      // Candidats situés dans la sélection, les plus fréquentés d'abord.
+      const poolZone = availablePOIs
+        .filter(p => p.lat && p.lng && dansSelectionINSEE(p.lat, p.lng))
+        .sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
+
+      let replaces = 0, restesHorsZone = 0;
+
+      for (const day of data.dailyPlans) {
+        if (!day.stops?.length) continue;
+        const prisCeJour = new Set(day.stops.map(s => s.locationName));
+
+        for (const s of day.stops) {
+          // Les centres équestres sont des livraisons à une adresse imposée et
+          // les concurrents sont des cibles choisies pour elles-mêmes : ni les
+          // uns ni les autres ne se déplacent.
+          if (s.type === 'equestrian' || s.type === 'competitor') continue;
+          if (!horsZone(s)) continue;
+
+          const remplacant = poolZone.find(p => !prisCeJour.has(p.name) && canUse(p.name));
+          if (!remplacant) { restesHorsZone++; continue; }
+
+          prisCeJour.delete(s.locationName);
+          Object.assign(s, {
+            locationName: remplacant.name,
+            address: remplacant.address,
+            lat: remplacant.lat,
+            lng: remplacant.lng,
+            type: remplacant.type,
+            source: 'ZONE INSEE',
+            marketDays: remplacant.marketDays || [],
+          });
+          prisCeJour.add(remplacant.name);
+          markUsed(remplacant.name);
+          replaces++;
+        }
+      }
+
+      console.log(`[INSEE] Tracé recadré : ${replaces} arrêt(s) ramené(s) dans la sélection, ${restesHorsZone} laissé(s) hors zone (pool épuisé), ${poolZone.length} lieu(x) disponibles dans les carreaux.`);
+      if (restesHorsZone > 0) {
+        inseeHorsZone = { restes: restesHorsZone, disponibles: poolZone.length };
       }
     }
 
@@ -2312,6 +2372,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     generatedData = data;
     renderZoneLandmarks(zoneLandmarks);
     lucide.createIcons();
+
+    if (inseeHorsZone && !poolMaigre && !poolDeSecours) {
+      showMessage(
+        `${inseeHorsZone.restes} arrêt(s) n'ont pas pu être placés dans vos zones INSEE : `
+        + `seulement ${inseeHorsZone.disponibles} lieu(x) exploitables ont été trouvés à l'intérieur des `
+        + `carreaux sélectionnés. Élargissez la sélection sur la carte du potentiel pour y gagner des `
+        + `commerces et des arrêts de transport.`,
+        'warn'
+      );
+    }
 
     if (poolMaigre || poolDeSecours) {
       const n = poolMaigre?.trouves ?? 0;
