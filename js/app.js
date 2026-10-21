@@ -958,11 +958,24 @@ async function handleGenerate() {
     // de réponse se fond dans celui du scan principal au lieu de s'y ajouter.
     const promessePlaceNodes = fetchPlaceNodes(originObj.lat, originObj.lng, radius);
     const promesseLandmarks  = fetchZoneLandmarks(originObj.lat, originObj.lng, radius);
+    // L'annuaire de l'Éducation nationale est interrogé même quand Overpass
+    // répond : les sorties de classe sont un créneau clé du plan et la
+    // couverture scolaire d'OSM est trop irrégulière pour s'y fier.
+    const promesseEcoles = fetchEcolesFR(originObj.lat, originObj.lng, radius);
 
-    const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius, minPois);
+    const [poisOSM, ecolesOfficielles] = await Promise.all([
+      fetchRealPOIs(originObj.lat, originObj.lng, radius, minPois),
+      promesseEcoles,
+    ]);
+    // Une école de l'annuaire remplace son homonyme OSM : même lieu, mais
+    // avec l'état d'ouverture vérifié et le niveau scolaire. Le regroupement
+    // se fait sur le nom normalisé et la proximité, les libellés différant
+    // d'une source à l'autre (« Ecole élémentaire » contre « École Primaire »).
+    const realPOIsRaw = dedoublonnerEcoles([...ecolesOfficielles, ...poisOSM]);
     const targetCity = originObj.city || inputRefs.address.value.split(',')[0].trim();
 
-    console.log(`[POI] ${realPOIsRaw.length} points d'intérêt trouvés dans la zone (rayon ${radius}km).`);
+    console.log(`[POI] ${realPOIsRaw.length} points d'intérêt dans la zone `
+      + `(rayon ${radius}km, dont ${ecolesOfficielles.length} école(s) de l'annuaire officiel).`);
 
     // --- Filtrage exclusions ---
     const excludedList = inputRefs.excludedCities.value.trim().toLowerCase()

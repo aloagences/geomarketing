@@ -718,6 +718,47 @@ async function _ignCouche(couche, lat, lng, radiusKm, maxFeatures = 1500) {
   } finally { clearTimeout(timer); }
 }
 
+/**
+ * Un même groupe scolaire apparaît sous plusieurs libellés — « École Primaire
+ * Victor Hugo » à l'IGN, « Ecole maternelle Victor Hugo » et « Ecole
+ * élémentaire Victor Hugo » à l'annuaire — souvent au même endroit. Pour un
+ * chauffeur c'est un seul arrêt. On regroupe sur le nom débarrassé de ses
+ * qualificatifs et des accents, à condition que les points soient à moins de
+ * 500 m, et on garde la fiche la plus riche.
+ */
+function dedoublonnerEcoles(pois) {
+  const clef = (n) => (n || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\b(ecole|groupe scolaire)\b/g, '')
+    .replace(/\b(primaire|elementaire|maternelle|publique|privee|prive)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+
+  const gardes = [];
+  const ecoles = [];
+  for (const p of pois) (p.type === 'school' ? ecoles : gardes).push(p);
+
+  const groupes = [];
+  for (const e of ecoles) {
+    const k = clef(e.name);
+    const proche = groupes.find(g =>
+      g.cle === k && calculateDistance(g.ref.lat, g.ref.lng, e.lat, e.lng) <= 0.5
+    );
+    if (proche) proche.membres.push(e);
+    else groupes.push({ cle: k, ref: e, membres: [e] });
+  }
+
+  for (const g of groupes) {
+    // L'annuaire de l'Éducation nationale d'abord : état d'ouverture vérifié
+    // et adresse postale réelle.
+    const best = g.membres.sort((a, b) =>
+      (b._source === 'ÉDUCATION') - (a._source === 'ÉDUCATION') ||
+      (b.publicScore || 0) - (a.publicScore || 0)
+    )[0];
+    gardes.push(best);
+  }
+  return gardes;
+}
+
 /** Centre d'une géométrie GeoJSON quelconque, en [lat, lng]. */
 function _centreGeoJSON(g) {
   if (!g) return null;
@@ -728,6 +769,72 @@ function _centreGeoJSON(g) {
   let sx = 0, sy = 0;
   for (const [x, y] of pts) { sx += x; sy += y; }
   return [sy / pts.length, sx / pts.length];
+}
+
+/**
+ * Écoles via l'annuaire officiel de l'Éducation nationale.
+ * Source plus sûre qu'OSM et que la BDTOPO pour ce type précis : elle porte
+ * l'état d'ouverture de l'établissement, distingue maternelle et élémentaire,
+ * et donne l'adresse. Les sorties de classe étant un créneau clé du plan,
+ * la requête est lancée même quand Overpass répond.
+ */
+async function fetchEcolesFR(lat, lng, radiusKm) {
+  const où = encodeURIComponent(
+    `distance(position, geom'POINT(${lng} ${lat})', ${Math.round(radiusKm)}km)`
+  );
+  // L'API plafonne à 100 lignes par appel : deux pages, car une grande ville
+  // dépasse largement la centaine d'établissements dans un rayon de 10 km.
+  const page = async (offset) => {
+    const url = 'https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets'
+      + `/fr-en-annuaire-education/records?where=${où}&limit=100&offset=${offset}`
+      + '&select=nom_etablissement,type_etablissement,nom_commune,adresse_1,latitude,longitude,etat,ecole_maternelle,ecole_elementaire';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) throw new Error(`Annuaire ${res.status}`);
+      return (await res.json()).results || [];
+    } catch (e) {
+      console.warn(`[Écoles] annuaire indisponible (offset ${offset}) : ${e.message}`);
+      return [];
+    } finally { clearTimeout(timer); }
+  };
+
+  const premiere = await page(0);
+  // Deuxième page seulement si la première est pleine : inutile en rase campagne.
+  const lignes = premiere.length < 100
+    ? premiere
+    : [...premiere, ...await page(100)];
+
+  const pois = [];
+  for (const r of lignes) {
+    if (r.etat && r.etat !== 'OUVERT') continue;
+    if (!r.latitude || !r.longitude) continue;
+    // Collèges et lycées : les parents n'y font plus la sortie des classes.
+    if (r.type_etablissement && !/^(Ecole|École)$/i.test(r.type_etablissement)) continue;
+    const d = calculateDistance(lat, lng, r.latitude, r.longitude);
+    if (d > radiusKm) continue;
+
+    // En maternelle l'enfant est remis en main propre : tous les parents
+    // descendent de voiture et attendent sur le trottoir. En élémentaire
+    // une partie repart seule. La maternelle vaut donc un point de plus.
+    const score = r.ecole_maternelle == 1 ? 13 : 12;
+    pois.push({
+      name: r.nom_etablissement,
+      address: [r.adresse_1, r.nom_commune].filter(Boolean).join(', ') || r.nom_etablissement,
+      lat: r.latitude, lng: r.longitude,
+      type: 'school',
+      distance: d.toFixed(1),
+      reliability: POI_RELIABILITY.school,
+      publicScore: score,
+      hasProperName: true,
+      hours: 'Non spécifié',
+      marketDays: [],
+      _source: 'ÉDUCATION',
+    });
+  }
+  console.log(`[Écoles] ${pois.length} école(s) ouverte(s) depuis l'annuaire officiel.`);
+  return pois;
 }
 
 async function _sireneCommerces(lat, lng, radiusKm, pages = 4) {
@@ -761,13 +868,17 @@ async function _sireneCommerces(lat, lng, radiusKm, pages = 4) {
  */
 async function fetchPOIsSecoursFR(lat, lng, radiusKm) {
   const t0 = Date.now();
-  const [zones, transports, entreprises] = await Promise.all([
+  const [zones, transports, entreprises, ecoles] = await Promise.all([
     _ignCouche('BDTOPO_V3:zone_d_activite_ou_d_interet', lat, lng, radiusKm),
     _ignCouche('BDTOPO_V3:equipement_de_transport', lat, lng, radiusKm, 400),
     _sireneCommerces(lat, lng, radiusKm),
+    fetchEcolesFR(lat, lng, radiusKm),
   ]);
 
-  const pois = [];
+  // Les écoles de l'annuaire priment sur celles de la BDTOPO : même objet,
+  // mais avec l'état d'ouverture et le niveau scolaire.
+  const pois = [...ecoles];
+  const ecolesVues = new Set(ecoles.map(e => e.name.toLowerCase()));
 
   for (const f of [...zones, ...transports]) {
     const p = f.properties || {};
@@ -777,6 +888,7 @@ async function fetchPOIsSecoursFR(lat, lng, radiusKm) {
     const [type, score] = regle;
     const nom = p.toponyme || p.nom_commercial;
     if (!nom) continue;
+    if (type === 'school' && ecolesVues.has(nom.toLowerCase())) continue;
     const c = _centreGeoJSON(f.geometry);
     if (!c) continue;
     const d = calculateDistance(lat, lng, c[0], c[1]);
@@ -831,9 +943,10 @@ async function fetchPOIsSecoursFR(lat, lng, radiusKm) {
     }
   }
 
-  const uniques = pois.filter((v, i, a) =>
+  let uniques = pois.filter((v, i, a) =>
     a.findIndex(x => x.name === v.name && x.address === v.address) === i
   );
+  uniques = dedoublonnerEcoles(uniques);
   console.log(`[Repli FR] ${uniques.length} lieux en ${Date.now() - t0} ms `
     + `(IGN ${uniques.filter(p => p._source === 'IGN').length}, `
     + `SIRENE ${uniques.filter(p => p._source === 'SIRENE').length}).`);
