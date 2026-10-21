@@ -299,6 +299,24 @@ function streetLabel(address) {
 }
 
 /**
+ * Horaires OSM rendus lisibles pour un chauffeur.
+ * `opening_hours` suit une grammaire riche qu'on ne cherche pas à interpréter :
+ * on se contente d'en extraire la première plage horaire, qui suffit à savoir
+ * si l'on arrive avant l'ouverture. Rien d'exploitable → rien d'affiché,
+ * plutôt qu'une mention cryptique du type « Mo-Sa 08:00-12:30,15:00-19:00 ».
+ */
+function horairesLisibles(oh) {
+  if (!oh || oh === 'Non spécifié') return '';
+  if (/^24\/7$/.test(oh.trim())) return 'Ouvert 24h/24';
+  const plages = oh.match(/\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}/g);
+  if (!plages?.length) return '';
+  const propre = (p) => p.replace(/\s/g, '').replace(/:00/g, 'h').replace(/:/g, 'h');
+  return plages.length > 1
+    ? `${propre(plages[0])} / ${propre(plages[1])}`
+    : propre(plages[0]);
+}
+
+/**
  * Corps visible d'un arrêt (titre secteur + repères).
  * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
  */
@@ -309,6 +327,10 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
   // Repères visuels : lieu principal + commerces proches détectés dans OSM
   const marks = [stop.locationName, ...(stop.landmarks || [])].filter(Boolean);
   const marksHtml = marks.map(m => `<span class="font-medium text-gray-700">${sanitize(m)}</span>`).join('<span class="text-gray-300">·</span>');
+
+  // Horaires d'ouverture du lieu d'ancrage : un commerce fermé, c'est un
+  // trottoir vide. Le chauffeur voit tout de suite s'il arrive au bon moment.
+  const horaires = horairesLisibles(stop.hours);
 
   return `
     <div class="flex items-center flex-wrap gap-2">
@@ -329,6 +351,7 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
       <span class="text-gray-400 text-xs">Repères :</span>
       ${marksHtml}
       ${city ? `<span class="text-gray-400">${sanitize(city)}</span>` : ''}
+      ${horaires ? `<span class="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">${sanitize(horaires)}</span>` : ''}
       <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">
         SRC: ${sanitize(srcLabel)}
       </span>
@@ -929,6 +952,13 @@ async function handleGenerate() {
     // Besoin réel : ~8 arrêts/jour, marge 1.5, chaque POI réutilisable 2 fois.
     // Sous ce seuil, l'échelle de repli s'épuise et invente des arrêts.
     const minPois = Math.max(30, Math.ceil(duration * 8 * 1.5 / 2));
+
+    // Centres de peuplement et fiche de repérage ne dépendent que de l'origine
+    // et du rayon : on les lance tout de suite, sans les attendre. Leur temps
+    // de réponse se fond dans celui du scan principal au lieu de s'y ajouter.
+    const promessePlaceNodes = fetchPlaceNodes(originObj.lat, originObj.lng, radius);
+    const promesseLandmarks  = fetchZoneLandmarks(originObj.lat, originObj.lng, radius);
+
     const realPOIsRaw = await fetchRealPOIs(originObj.lat, originObj.lng, radius, minPois);
     const targetCity = originObj.city || inputRefs.address.value.split(',')[0].trim();
 
@@ -1143,41 +1173,35 @@ async function handleGenerate() {
     if (inseeSecteurs.length > 0) {
       setProgress('Recherche dans les zones INSEE sélectionnées…', 50);
 
-      const lots = await Promise.all(inseeSecteurs.map(async (sec) => {
-        // Rayon couvrant le secteur : chaque carreau fait 0,04 km².
-        const rayonSec = Math.min(4, Math.sqrt((sec.nbCarreaux * 0.04) / Math.PI) + 0.4);
-        try {
-          return { sec, pois: await fetchRealPOIs(sec.lat, sec.lng, rayonSec) };
-        } catch (e) {
-          console.warn(`[INSEE] POI indisponibles pour ${sec.commune}`, e);
-          return { sec, pois: [] };
-        }
+      // Un seul aller-retour pour les six secteurs : chaque carreau fait
+      // 0,04 km², d'où le rayon déduit du nombre de carreaux du secteur.
+      const centres = inseeSecteurs.map(sec => ({
+        lat: sec.lat, lng: sec.lng,
+        rayonKm: Math.min(4, Math.sqrt((sec.nbCarreaux * 0.04) / Math.PI) + 0.4),
       }));
+      const pois = await fetchPOIsAutourDe(centres, originObj);
 
-      for (const { sec, pois } of lots) {
-        const nouveaux = pois.filter(p =>
-          !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
-          !isBlocked(p.name, p.address, p.lat, p.lng)
-        );
-        nouveaux.forEach(p => { p._priorityZone = true; p._insee = true; });
-        // Les POI déjà connus qui tombent dans la sélection héritent du flag.
-        filteredPOIs.forEach(p => {
-          if (dansSelectionINSEE(p.lat, p.lng)) { p._priorityZone = true; p._insee = true; }
-        });
-        filteredPOIs.push(...nouveaux);
-        console.log(`[INSEE] Secteur "${sec.commune}" (${sec.ind} hab., ${sec.nbCarreaux} carreaux) → +${nouveaux.length} POI(s)`);
-      }
+      const nouveaux = pois.filter(p =>
+        !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
+        !isBlocked(p.name, p.address, p.lat, p.lng)
+      );
+      nouveaux.forEach(p => { p._priorityZone = true; p._insee = true; });
+      // Les POI déjà connus qui tombent dans la sélection héritent du flag.
+      filteredPOIs.forEach(p => {
+        if (dansSelectionINSEE(p.lat, p.lng)) { p._priorityZone = true; p._insee = true; }
+      });
+      filteredPOIs.push(...nouveaux);
+      console.log(`[INSEE] ${inseeSecteurs.length} secteur(s) interrogés en une requête → +${nouveaux.length} POI(s).`);
     }
 
     // --- Bonus "lieu de vie" : proximité d'un centre de peuplement ---
     // Un POI à moins de 800 m d'un bourg/village/quartier est un lieu fréquenté.
     // Mesure directe, contrairement au comptage de voisins qui ne refléterait
     // que la composition de notre propre requête Overpass.
-    // Les lieux structurants de la zone sont récupérés en parallèle : requête
-    // indépendante, inutile d'ajouter sa latence à celle des centres de peuplement.
+    // Lancées avant le scan principal : à ce stade elles ont déjà répondu, ou
+    // terminent pendant que le reste s'exécute.
     const [placeNodes, zoneLandmarks] = await Promise.all([
-      fetchPlaceNodes(originObj.lat, originObj.lng, radius),
-      fetchZoneLandmarks(originObj.lat, originObj.lng, radius),
+      promessePlaceNodes, promesseLandmarks,
     ]);
     if (placeNodes.length > 0) {
       for (const poi of filteredPOIs) {
@@ -1637,7 +1661,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             Object.assign(stop, {
               locationName: real.name, address: real.address,
               lat: real.lat, lng: real.lng, type: real.type, source: 'OSM',
-              marketDays: real.marketDays || [],
+              marketDays: real.marketDays || [], hours: real.hours,
             });
             usedThisDay.add(real.name);
             markUsed(real.name);
@@ -1686,7 +1710,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               locationName: fb.name, address: fb.address,
               lat: fb.lat, lng: fb.lng, type: fb.type,
               source: 'CORRECTION (Base OSM)',
-              marketDays: fb.marketDays || [],
+              marketDays: fb.marketDays || [], hours: fb.hours,
             });
             usedThisDay.add(fb.name);
             markUsed(fb.name);
@@ -1786,7 +1810,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             lng: candidate.lng,
             type: candidate.type,
             source: 'ZONE PRIORITAIRE',
-            marketDays: candidate.marketDays || [],
+            marketDays: candidate.marketDays || [], hours: candidate.hours,
           });
           day.stops[replaceIdx].time = savedTime;
           usedNames.add(candidate.name);
@@ -1833,7 +1857,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             lng: remplacant.lng,
             type: remplacant.type,
             source: 'ZONE INSEE',
-            marketDays: remplacant.marketDays || [],
+            marketDays: remplacant.marketDays || [], hours: remplacant.hours,
           });
           prisCeJour.add(remplacant.name);
           markUsed(remplacant.name);
@@ -2101,7 +2125,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           time: t.hasMorning ? t.mornStart : t.aftStart,
           locationName: p.name, address: p.address, type: p.type,
           lat: p.lat, lng: p.lng, source: 'COMPLÉMENT (base OSM)',
-          marketDays: p.marketDays || [],
+          marketDays: p.marketDays || [], hours: p.hours,
         }));
         if (day.stops.length) {
           console.warn(`[Couverture] ${day.day} : journée vide amorcée avec ${day.stops.length} lieu(x) du pool.`);

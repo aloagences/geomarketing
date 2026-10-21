@@ -582,14 +582,49 @@ const OVERPASS_ENDPOINTS = [
   "https://lz4.overpass-api.de/api/interpreter",
 ];
 
+// --- Coupe-circuit Overpass ---
+// Les serveurs sont bénévoles et tombent par périodes. Chaque requête attend
+// alors son délai complet avant d'abandonner, et une génération en enchaîne
+// une bonne dizaine : scan principal, secteurs INSEE, centres de peuplement,
+// fiche de repérage. Résultat mesuré sur Mallemort pendant une panne : 42 s
+// d'attente pour finir sur le repli Nominatim de toute façon. Après deux
+// échecs totaux d'affilée on considère le service injoignable pendant une
+// minute, et les requêtes suivantes rendent la main immédiatement.
+const OVERPASS_REPOS_MS = 60000;
+let _overpassEchecs = 0;
+let _overpassSilenceJusqua = 0;
+
+function overpassInjoignable() {
+  if (Date.now() < _overpassSilenceJusqua) return true;
+  if (_overpassSilenceJusqua) { _overpassSilenceJusqua = 0; _overpassEchecs = 0; }
+  return false;
+}
+
+function signalerOverpassOK() {
+  _overpassEchecs = 0;
+  _overpassSilenceJusqua = 0;
+}
+
+function signalerOverpassEchec() {
+  if (++_overpassEchecs >= 2) {
+    _overpassSilenceJusqua = Date.now() + OVERPASS_REPOS_MS;
+    console.warn(`[Overpass] Injoignable — requêtes suspendues ${OVERPASS_REPOS_MS / 1000}s.`);
+  }
+}
+
 // Requête rapide : nodes uniquement, types essentiels pour le chauffeur
 function buildEssentialQuery(lat, lng, radiusMeters) {
   return `[out:json][timeout:25];(` +
     `node["highway"="bus_stop"](around:${radiusMeters},${lat},${lng});` +
     `node["railway"~"station|tram_stop|halt"](around:${radiusMeters},${lat},${lng});` +
-    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|supermarket|marketplace|hospital|clinic"](around:${radiusMeters},${lat},${lng});` +
+    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|supermarket|marketplace|hospital|clinic|school"](around:${radiusMeters},${lat},${lng});` +
     `node["shop"~"bakery|pharmacy|supermarket|convenience|butcher|newsagent|hairdresser|optician|florist|tobacco|pastry|greengrocer|deli"](around:${radiusMeters},${lat},${lng});` +
-    `);out 600;`;
+    // Supermarchés et écoles sont cartographiés en polygones (le bâtiment),
+    // pas en points : sans ces deux lignes, un hypermarché et une école
+    // primaire n'existaient tout simplement pas pour la requête rapide.
+    `way["shop"~"supermarket|mall|department_store"](around:${radiusMeters},${lat},${lng});` +
+    `way["amenity"="school"](around:${radiusMeters},${lat},${lng});` +
+    `);out center 700;`;
 }
 
 // Requête complète (plus lente) : tous types + way
@@ -599,11 +634,12 @@ function buildFullQuery(lat, lng, radiusMeters) {
     `node["railway"~"station|tram_stop|halt"](around:${radiusMeters},${lat},${lng});` +
     `node["shop"](around:${radiusMeters},${lat},${lng});` +
     `way["shop"](around:${radiusMeters},${lat},${lng});` +
-    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|cinema|library|hospital|clinic|dentist|doctors|marketplace|community_centre"](around:${radiusMeters},${lat},${lng});` +
-    `way["amenity"~"pharmacy|bakery|supermarket|townhall|place_of_worship|hospital|clinic|marketplace"](around:${radiusMeters},${lat},${lng});` +
+    `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|cinema|library|hospital|clinic|dentist|doctors|marketplace|community_centre|school"](around:${radiusMeters},${lat},${lng});` +
+    `way["amenity"~"pharmacy|bakery|supermarket|townhall|place_of_worship|hospital|clinic|marketplace|school"](around:${radiusMeters},${lat},${lng});` +
     `node["leisure"~"sports_centre|stadium|swimming_pool|fitness_centre|park"](around:${radiusMeters},${lat},${lng});` +
+    `way["leisure"~"sports_centre|stadium|swimming_pool"](around:${radiusMeters},${lat},${lng});` +
     `node["tourism"~"museum|attraction"](around:${radiusMeters},${lat},${lng});` +
-    `);out center 1000;`;
+    `);out center 1200;`;
 }
 
 // Fallback Nominatim : cherche des types spécifiques quand Overpass échoue
@@ -667,6 +703,7 @@ async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
   }
 
   async function tryOverpass(queryFn, radiusMeters) {
+    if (overpassInjoignable()) return null;
     const query = queryFn(lat, lng, radiusMeters);
     const body = 'data=' + encodeURIComponent(query);
 
@@ -694,8 +731,11 @@ async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
 
     // Promise.any : première réponse valide. Rejette si tous échouent.
     try {
-      return await Promise.any(attempts);
+      const r = await Promise.any(attempts);
+      signalerOverpassOK();
+      return r;
     } catch {
+      signalerOverpassEchec();
       return null; // null = échec total (pas juste 0 résultats)
     }
   }
@@ -707,21 +747,26 @@ async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
 
   const done = (p) => { console.log(`[POI] pool final: ${p.length} lieux (besoin: ${minPois})`); return p; };
 
-  // Étape 1 : requête rapide essentielle à 4km (toujours dans le rayon)
-  const r1 = await tryOverpass(buildEssentialQuery, r4km);
+  // Étapes 1 et 2 EN PARALLÈLE. Auparavant trois requêtes s'enchaînaient, et
+  // chaque échec coûtait son délai d'attente complet avant que la suivante ne
+  // démarre : jusqu'à 36 s avant d'obtenir le moindre lieu. La requête complète
+  // au rayon entier est un sur-ensemble de la requête rapide ; la rapide à 4 km
+  // reste lancée en même temps comme filet, car elle répond presque toujours
+  // quand la complète expire.
+  const [r1, r3] = await Promise.all([
+    tryOverpass(buildEssentialQuery, r4km),
+    tryOverpass(buildFullQuery, rFull),
+  ]);
   if (r1) pool = dedupe([...pool, ...r1]);
+  if (r3) pool = dedupe([...pool, ...r3]);
   if (withinRadius(pool).length >= minPois) return done(withinRadius(pool));
 
-  // Étape 2 : requête rapide essentielle au rayon complet
-  if (rFull > r4km) {
+  // Étape 2bis : la complète a échoué et le rayon dépasse 4 km → on tente la
+  // rapide sur tout le rayon, seul cas où une requête de plus se justifie.
+  if (!r3 && rFull > r4km) {
     const r2 = await tryOverpass(buildEssentialQuery, rFull);
     if (r2) pool = dedupe([...pool, ...r2]);
-    if (withinRadius(pool).length >= minPois) return done(withinRadius(pool));
   }
-
-  // Étape 3 : requête complète (nodes + ways) au rayon complet
-  const r3 = await tryOverpass(buildFullQuery, rFull);
-  if (r3) pool = dedupe([...pool, ...r3]);
 
   // Assez de lieux DANS le rayon → on s'y tient strictement (rayon respecté).
   // Élargir n'apporterait que des lieux HORS rayon : inutile ici, on s'arrête.
@@ -750,11 +795,69 @@ async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
 }
 
 /**
+ * Cherche des lieux autour de PLUSIEURS centres en une seule requête.
+ * Overpass accepte autant de clauses `around:` qu'on veut dans une union :
+ * interroger six secteurs coûte alors un aller-retour au lieu de six, chacun
+ * avec sa propre cascade de replis et ses délais d'attente.
+ *
+ * @param {Array<{lat:number,lng:number,rayonKm:number}>} centres
+ * @returns {Promise<Array>} lieux dédoublonnés, distance mesurée depuis origine
+ */
+async function fetchPOIsAutourDe(centres, origine) {
+  if (!centres?.length || overpassInjoignable()) return [];
+
+  const clauses = centres.map(c => {
+    const r = Math.round((c.rayonKm || 1) * 1000);
+    return `node["shop"](around:${r},${c.lat},${c.lng});`
+         + `way["shop"](around:${r},${c.lat},${c.lng});`
+         + `node["amenity"~"pharmacy|bakery|cafe|restaurant|fast_food|bank|post_office|townhall|place_of_worship|marketplace|school|library|cinema"](around:${r},${c.lat},${c.lng});`
+         + `way["amenity"~"pharmacy|bakery|supermarket|townhall|marketplace|school"](around:${r},${c.lat},${c.lng});`
+         + `node["highway"="bus_stop"](around:${r},${c.lat},${c.lng});`
+         + `node["railway"~"station|tram_stop|halt"](around:${r},${c.lat},${c.lng});`
+         + `node["leisure"~"sports_centre|stadium|swimming_pool|park"](around:${r},${c.lat},${c.lng});`;
+  }).join('');
+
+  const body = 'data=' + encodeURIComponent(`[out:json][timeout:50];(${clauses});out center 1200;`);
+
+  const course = Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 18000);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body, signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error('bad status');
+      const data = JSON.parse(await res.text());
+      if (!data.elements) throw new Error('no elements');
+      return data.elements;
+    } finally { clearTimeout(timer); }
+  }));
+
+  let elements;
+  try { elements = await course; signalerOverpassOK(); }
+  catch {
+    signalerOverpassEchec();
+    console.warn('[POI] requête multi-secteurs sans réponse.');
+    return [];
+  }
+
+  const pois = elements
+    .map(e => parsePOI(e, origine.lat, origine.lng))
+    .filter(Boolean);
+  return pois.filter((v, i, a) =>
+    a.findIndex(v2 => v2.name === v.name && v2.address === v.address) === i
+  );
+}
+
+/**
  * Récupère les centres de peuplement (villes, bourgs, villages, quartiers).
  * Sert à mesurer si un POI est dans un lieu de vie ou isolé en rase campagne.
  * Requête très légère : quelques dizaines de nœuds au maximum.
  */
 async function fetchPlaceNodes(lat, lng, radiusKm) {
+  if (overpassInjoignable()) return [];
   const rM = Math.min(radiusKm * 1000, 40000);
   const query = `[out:json][timeout:20];(` +
     `node["place"~"^(city|town|village|suburb|neighbourhood|hamlet)$"](around:${rM},${lat},${lng});` +
@@ -784,9 +887,11 @@ async function fetchPlaceNodes(lat, lng, radiusKm) {
 
   try {
     const places = await Promise.any(attempts);
+    signalerOverpassOK();
     console.log(`[POI] ${places.length} centres de peuplement détectés.`);
     return places;
   } catch {
+    signalerOverpassEchec();
     return []; // non bloquant : le bonus de score sera simplement absent
   }
 }
@@ -833,13 +938,22 @@ async function fetchZoneLandmarks(lat, lng, radiusKm) {
   // saturés). Contrairement à fetchRealPOIs, cette requête n'a aucun repli :
   // sans nouvelle tentative, la fiche de repérage disparaissait du PDF sans
   // que personne ne comprenne pourquoi.
+  // Le coupe-circuit court-circuite les tentatives quand le service est déjà
+  // connu pour injoignable : trois essais espacés coûtaient jusqu'à 40 s pour
+  // un résultat connu d'avance.
   let elements = null;
-  for (let essai = 1; essai <= 3 && !elements; essai++) {
-    try {
-      elements = await course();
-    } catch {
-      console.warn(`[Zone] Overpass muet (tentative ${essai}/3).`);
-      if (essai < 3) await new Promise(r => setTimeout(r, essai * 1500));
+  if (!overpassInjoignable()) {
+    for (let essai = 1; essai <= 3 && !elements; essai++) {
+      try {
+        elements = await course();
+        signalerOverpassOK();
+      } catch {
+        signalerOverpassEchec();
+        console.warn(`[Zone] Overpass muet (tentative ${essai}/3).`);
+        if (essai < 3 && !overpassInjoignable()) {
+          await new Promise(r => setTimeout(r, essai * 1500));
+        } else break;
+      }
     }
   }
   if (!elements) {
@@ -1085,7 +1199,10 @@ const POI_RELIABILITY = {
   culture: 5,      // mairie, église → repères civiques
   sport: 4,
   park: 3,
-  school: 2,
+  // L'école n'intéresse qu'aux sorties de classe, mais à ce moment-là c'est
+  // le meilleur arrêt de la journée : flux dense, capté, et exactement la
+  // cible famille. Le créneau est de toute façon imposé ailleurs.
+  school: 5,
   other: 1,
 };
 
@@ -1158,8 +1275,11 @@ function parsePOI(e, originLat, originLng) {
     }
   }
 
-  // Filtrer établissements non pertinents
-  if (/coll[eè]ge|lyc[eé]e|cr[eè]che|maternelle|universit[eé]|campus|facult[eé]|institut/i.test(name)) {
+  // Établissements hors cible : au collège et au-delà, les parents ne font
+  // plus la sortie des classes, il n'y a donc personne à toucher sur le
+  // trottoir. Les écoles primaires et maternelles restent, elles : c'est
+  // précisément là que se concentrent les familles aux heures de sortie.
+  if (/coll[eè]ge|lyc[eé]e|universit[eé]|campus|facult[eé]|institut|auto[- ]?[eé]cole/i.test(name)) {
     return null;
   }
 
@@ -1225,6 +1345,21 @@ function parsePOI(e, originLat, originLng) {
   if (tags.website || tags.phone || tags['contact:phone']) publicScore += 1;
   const checkDate = tags.check_date || tags['survey:date'];
   if (checkDate && /^20(2[0-9]|[3-9][0-9])/.test(checkDate)) publicScore += 1;
+
+  // Flux piéton réel. Un hypermarché et une épicerie de village partageaient
+  // jusqu'ici le même score « shopping » alors qu'ils ne font pas passer le
+  // même monde devant le véhicule. Le parking d'une grande surface est en
+  // outre l'endroit le plus simple où stationner une camionnette.
+  const GROS_FLUX = new Set(['supermarket', 'mall', 'department_store', 'wholesale']);
+  if (GROS_FLUX.has(tags.shop)) publicScore += 5;
+  else if (tags.shop === 'convenience' || tags.shop === 'greengrocer') publicScore += 1;
+
+  // Pôle d'échange : plusieurs lignes au même endroit, donc passage continu.
+  if (tags.public_transport === 'station' || tags.railway === 'station') publicScore += 3;
+
+  // Un lieu accessible en fauteuil est un lieu de plain-pied, visible depuis
+  // la rue et desservi par un trottoir : bon indice de visibilité.
+  if (tags.wheelchair === 'yes') publicScore += 1;
 
   return {
     name,
