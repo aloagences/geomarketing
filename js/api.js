@@ -642,6 +642,204 @@ function buildFullQuery(lat, lng, radiusMeters) {
     `);out center 1200;`;
 }
 
+// ===========================================================================
+// REPLI FRANÇAIS : IGN + SIRENE, quand Overpass ne répond pas
+// ===========================================================================
+// Overpass repose sur des serveurs bénévoles qui tombent par périodes entières.
+// Ces deux sources-ci sont des services publics français, indépendants l'un de
+// l'autre et d'OpenStreetMap :
+//   - IGN BDTOPO (data.geopf.fr, le même service que les carreaux INSEE) pour
+//     les équipements : écoles, places, mairies, postes, sport, culture, gares.
+//     Chaque objet porte un état, et on ne garde que « En service ».
+//   - SIRENE (recherche-entreprises.api.gouv.fr) pour les commerces, filtrés
+//     sur les codes NAF qui reçoivent du public et sur l'état administratif
+//     « A » (actif). C'est le registre officiel : meilleur signal que la carte
+//     collaborative pour savoir si une enseigne existe encore.
+
+// Nature BDTOPO → [type interne, score]. Tout ce qui n'est pas listé est
+// écarté : stations d'épuration, centrales et zones industrielles n'intéressent
+// personne. Les scores sont calés sur l'affluence réelle devant le véhicule,
+// pas sur l'importance patrimoniale : une chapelle de campagne reste un repère
+// utile mais ne fait passer personne, contrairement à un bureau de poste.
+const IGN_NATURE_TYPE = {
+  'Gare routière':                     ['transport', 14],
+  'Gare voyageurs uniquement':         ['transport', 14],
+  'Gare voyageurs et fret':            ['transport', 13],
+  'Arrêt voyageurs':                   ['transport', 12],
+  'Enseignement primaire':             ['school',    12],
+  'Poste':                             ['culture',   12],
+  'Mairie':                            ['culture',   11],
+  'Espace public':                     ['other',     10],
+  'Centre de documentation':           ['culture',   10],
+  'Complexe sportif couvert':          ['sport',     10],
+  'Stade':                             ['sport',      9],
+  'Piscine':                           ['sport',      9],
+  'Salle de spectacle ou conférence':  ['culture',    9],
+  "Autre établissement d'enseignement":['school',     8],
+  'Musée':                             ['culture',    8],
+  'Autre équipement sportif':          ['sport',      7],
+  'Aire de détente':                   ['park',       6],
+  'Centre équestre':                   ['sport',      6],
+  'Culte chrétien':                    ['culture',    5],
+  'Monument':                          ['other',      4],
+  'Point de vue':                      ['other',      4],
+};
+
+// Codes NAF qui font passer du public devant un véhicule.
+const NAF_COMMERCES = {
+  '47.11A': ['shopping', 12], '47.11B': ['shopping', 13], '47.11C': ['shopping', 15],
+  '47.11D': ['shopping', 15], '47.11F': ['shopping', 16], '47.19B': ['shopping', 14],
+  '10.71C': ['shopping', 13], '10.71D': ['shopping', 12], '47.24Z': ['shopping', 12],
+  '47.73Z': ['medical',  13], '47.22Z': ['shopping', 11], '47.21Z': ['shopping', 11],
+  '47.26Z': ['shopping', 11], '47.62Z': ['shopping', 10], '47.78A': ['shopping', 12],
+  '47.52B': ['shopping', 11], '47.71Z': ['shopping', 10], '96.02A': ['shopping', 10],
+  '56.10A': ['shopping',  9], '56.10C': ['shopping',  9], '56.30Z': ['shopping',  9],
+};
+
+async function _ignCouche(couche, lat, lng, radiusKm, maxFeatures = 1500) {
+  const dLat = radiusKm / 111;
+  const dLng = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+  const bbox = [lng - dLng, lat - dLat, lng + dLng, lat + dLat].map(n => n.toFixed(5)).join(',');
+  const params = new URLSearchParams({
+    SERVICE: 'WFS', VERSION: '2.0.0', REQUEST: 'GetFeature',
+    TYPENAMES: couche, COUNT: String(maxFeatures),
+    OUTPUTFORMAT: 'application/json', SRSNAME: 'EPSG:4326',
+    BBOX: `${bbox},CRS:84`,
+  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(`https://data.geopf.fr/wfs/ows?${params}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`WFS ${res.status}`);
+    return (await res.json()).features || [];
+  } catch (e) {
+    console.warn(`[Repli IGN] ${couche} indisponible`, e.message);
+    return [];
+  } finally { clearTimeout(timer); }
+}
+
+/** Centre d'une géométrie GeoJSON quelconque, en [lat, lng]. */
+function _centreGeoJSON(g) {
+  if (!g) return null;
+  if (g.type === 'Point') return [g.coordinates[1], g.coordinates[0]];
+  const plat = (a) => Array.isArray(a[0]) ? a.flatMap(plat) : [a];
+  const pts = plat(g.coordinates);
+  if (!pts.length) return null;
+  let sx = 0, sy = 0;
+  for (const [x, y] of pts) { sx += x; sy += y; }
+  return [sy / pts.length, sx / pts.length];
+}
+
+async function _sireneCommerces(lat, lng, radiusKm, pages = 4) {
+  const codes = Object.keys(NAF_COMMERCES).join(',');
+  const lots = await Promise.all(Array.from({ length: pages }, async (_, i) => {
+    // Départs échelonnés : quatre requêtes simultanées se faisaient parfois
+    // limiter par l'API, et la page revenait vide sans que rien ne le signale.
+    await new Promise(r => setTimeout(r, i * 150));
+    const url = `https://recherche-entreprises.api.gouv.fr/near_point`
+      + `?lat=${lat}&long=${lng}&radius=${Math.min(radiusKm, 50)}`
+      + `&etat_administratif=A&activite_principale=${encodeURIComponent(codes)}`
+      + `&per_page=25&page=${i + 1}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (!res.ok) throw new Error(`SIRENE ${res.status}`);
+      return (await res.json()).results || [];
+    } catch (e) {
+      console.warn(`[Repli SIRENE] page ${i + 1} sans réponse : ${e.message}`);
+      return [];
+    }
+    finally { clearTimeout(timer); }
+  }));
+  return lots.flat();
+}
+
+/**
+ * Lieux réels d'un secteur, sans passer par OpenStreetMap.
+ * @returns {Promise<Array>} POI au même format que parsePOI
+ */
+async function fetchPOIsSecoursFR(lat, lng, radiusKm) {
+  const t0 = Date.now();
+  const [zones, transports, entreprises] = await Promise.all([
+    _ignCouche('BDTOPO_V3:zone_d_activite_ou_d_interet', lat, lng, radiusKm),
+    _ignCouche('BDTOPO_V3:equipement_de_transport', lat, lng, radiusKm, 400),
+    _sireneCommerces(lat, lng, radiusKm),
+  ]);
+
+  const pois = [];
+
+  for (const f of [...zones, ...transports]) {
+    const p = f.properties || {};
+    if (p.etat_de_l_objet && p.etat_de_l_objet !== 'En service') continue;
+    const regle = IGN_NATURE_TYPE[p.nature];
+    if (!regle) continue;
+    const [type, score] = regle;
+    const nom = p.toponyme || p.nom_commercial;
+    if (!nom) continue;
+    const c = _centreGeoJSON(f.geometry);
+    if (!c) continue;
+    const d = calculateDistance(lat, lng, c[0], c[1]);
+    if (d > radiusKm) continue;
+
+    // `importance` BDTOPO : 1 = rayonnement national, 7 = local. On en fait un
+    // petit bonus inversé pour que les équipements majeurs remontent.
+    const bonus = Math.max(0, 5 - (parseInt(p.importance, 10) || 5));
+    pois.push({
+      name: nom,
+      address: p.adresse_postale || (p.commune ? `${nom}, ${p.commune}` : nom),
+      lat: c[0], lng: c[1], type,
+      distance: d.toFixed(1),
+      reliability: POI_RELIABILITY[type] || 1,
+      publicScore: score + bonus,
+      hasProperName: true,
+      hours: 'Non spécifié',
+      marketDays: [],
+      _source: 'IGN',
+    });
+  }
+
+  const vus = new Set();
+  for (const e of entreprises) {
+    for (const et of (e.matching_etablissements || [])) {
+      if (et.etat_administratif !== 'A') continue;
+      const naf = NAF_COMMERCES[et.activite_principale];
+      if (!naf) continue;
+      if (!et.latitude || !et.longitude) continue;
+      const elat = parseFloat(et.latitude), elng = parseFloat(et.longitude);
+      const d = calculateDistance(lat, lng, elat, elng);
+      if (d > radiusKm) continue;
+      const cle = `${et.siret || e.siren}`;
+      if (vus.has(cle)) continue;
+      vus.add(cle);
+
+      // L'enseigne parle au chauffeur, la raison sociale non : « LIDL »
+      // plutôt que « LIDL SNC », et surtout pas « SCI DES TROIS CHENES ».
+      const nom = et.nom_commercial || e.sigle || e.nom_complet || '';
+      pois.push({
+        name: nom.replace(/\s*\([^)]*\)\s*$/, '').trim(),
+        address: et.adresse || e.siege?.adresse || nom,
+        lat: elat, lng: elng, type: naf[0],
+        distance: d.toFixed(1),
+        reliability: POI_RELIABILITY[naf[0]] || 1,
+        publicScore: naf[1],
+        hasProperName: true,
+        hours: 'Non spécifié',
+        marketDays: [],
+        _source: 'SIRENE',
+      });
+    }
+  }
+
+  const uniques = pois.filter((v, i, a) =>
+    a.findIndex(x => x.name === v.name && x.address === v.address) === i
+  );
+  console.log(`[Repli FR] ${uniques.length} lieux en ${Date.now() - t0} ms `
+    + `(IGN ${uniques.filter(p => p._source === 'IGN').length}, `
+    + `SIRENE ${uniques.filter(p => p._source === 'SIRENE').length}).`);
+  return uniques;
+}
+
 // Fallback Nominatim : cherche des types spécifiques quand Overpass échoue
 async function fetchPOIsNominatim(lat, lng, radiusKm) {
   const r = Math.min(radiusKm, 10); // Nominatim : limiter à 10km pour la pertinence
@@ -783,7 +981,14 @@ async function fetchRealPOIs(lat, lng, radiusKm, minPois = 30) {
     if (r4) pool = dedupe([...pool, ...r4]);
   }
 
-  // Étape 5 : fallback Nominatim — toujours des résultats même si Overpass est KO
+  // Étape 5 : repli français IGN + SIRENE. Essayé AVANT Nominatim, qui ne
+  // renvoie guère que des noms de rue sans type ni fiabilité.
+  if (withinRadius(pool).length < minPois) {
+    const secours = await fetchPOIsSecoursFR(lat, lng, radiusKm);
+    if (secours.length > 0) pool = dedupe([...pool, ...secours]);
+  }
+
+  // Étape 6 : Nominatim en tout dernier recours.
   if (pool.length < 3) {
     const nominatim = await fetchPOIsNominatim(lat, lng, radiusKm);
     if (nominatim.length > 0) pool = dedupe([...pool, ...nominatim]);
