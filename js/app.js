@@ -533,6 +533,7 @@ async function saveStop(stopId) {
     }
     if (newName) stop.locationName = newName;
     stop.source = 'MANUEL';
+    stop.landmarks = []; // Supprimer repères auto quand édition manuelle
 
     // Recalculer distance
     let distBadge = '';
@@ -547,6 +548,12 @@ async function saveStop(stopId) {
     if (viewDiv) {
       viewDiv.innerHTML = renderStopBodyHTML(stop, stopId, distBadge, 'MANUEL');
     }
+
+    // Mettre à jour aussi les inputs d'édition pour les modifications suivantes
+    const editAddrInput = document.getElementById(`edit-addr-${stopId}`);
+    const editNameInput = document.getElementById(`edit-name-${stopId}`);
+    if (editAddrInput) editAddrInput.value = stop.address;
+    if (editNameInput) editNameInput.value = stop.locationName;
 
     cancelEditStop(stopId);
     lucide.createIcons(); // Rafraîchir les icônes Lucide après mise à jour du DOM
