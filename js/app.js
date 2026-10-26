@@ -609,7 +609,13 @@ function renderSignatureBlock(icon, color, label, start, end) {
 // GARDE-FOUS ÉCOLES
 // ========================================
 
-function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = []) {
+/**
+ * @param {Function} [remplacerLieu] - (stop, dayPlan) → POI de substitution.
+ *   Hors période scolaire, l'ancienne version se contentait de retyper l'arrêt
+ *   en « shopping » : le chauffeur restait envoyé devant une grille fermée,
+ *   avec le nom de l'école en repère. Il faut un vrai lieu à la place.
+ */
+function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remplacerLieu = null) {
   dailyPlans.forEach((dayPlan, idx) => {
     const dayStr = (dayPlan.day || '').toLowerCase();
     const isWeekSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
@@ -631,7 +637,26 @@ function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = []) {
       if (!isSchool) return;
 
       if (!isSchoolDay) {
-        stop.type = 'shopping';
+        // Vacances, mercredi ou week-end : la cour est vide et les grilles
+        // fermées. On substitue un vrai lieu de vie ; à défaut seulement, on
+        // retype l'arrêt pour qu'il ne soit pas traité comme une sortie
+        // d'école par la suite.
+        const neuf = remplacerLieu?.(stop, dayPlan);
+        if (neuf) {
+          Object.assign(stop, {
+            locationName: neuf.name,
+            address: neuf.address,
+            type: neuf.type,
+            lat: neuf.lat,
+            lng: neuf.lng,
+            source: isHoliday ? 'VACANCES SCOLAIRES' : 'HORS JOUR D\'ÉCOLE',
+            marketDays: neuf.marketDays || [],
+            hours: neuf.hours,
+            landmarks: undefined, // recalculés plus tard sur le nouveau point
+          });
+        } else {
+          stop.type = 'shopping';
+        }
         return;
       }
 
@@ -763,7 +788,17 @@ function findLandmarks(stop, pois, max = 2) {
     .map(p => ({ p, d: calculateDistance(stop.lat, stop.lng, p.lat, p.lng) }))
     .filter(x => x.d <= 0.3); // calculateDistance renvoie des km
 
-  const byScore = (a, b) => (b.p.publicScore || 1) - (a.p.publicScore || 1) || a.d - b.d;
+  // Une école est un mauvais repère de navigation : grille anonyme, souvent
+  // en retrait de la rue, et aucune activité visible hors sortie des classes
+  // — a fortiori pendant les vacances. Depuis que l'annuaire officiel les
+  // fait remonter avec un score élevé, elles monopolisaient les trois repères
+  // de chaque arrêt. On les relègue derrière les enseignes.
+  const estEcole = (p) => p.type === 'school'
+    || /ecole|école|scolaire|maternelle/i.test(p.name || '');
+  const byScore = (a, b) =>
+    (estEcole(a.p) ? 1 : 0) - (estEcole(b.p) ? 1 : 0)
+    || (b.p.publicScore || 1) - (a.p.publicScore || 1)
+    || a.d - b.d;
   candidats.sort(byScore);
 
   // Une boulangerie (ou pâtisserie/opticien) est le repère le plus parlant
@@ -2188,7 +2223,31 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     // --- Garde-fou écoles (2e passage post-topographie) ---
-    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
+    // À ce stade les arrêts ont leurs coordonnées réelles : on peut substituer
+    // un vrai commerce aux écoles tombant hors période scolaire.
+    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays, (stop, dayPlan) => {
+      const prisCeJour = new Set((dayPlan.stops || []).map(s => s.locationName));
+      const candidats = availablePOIs.filter(p =>
+        p.lat && p.lng &&
+        p.type !== 'school' &&
+        !/ecole|école|scolaire|maternelle/i.test(p.name || '') &&
+        !prisCeJour.has(p.name) &&
+        canUse(p.name) &&
+        (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
+      );
+      if (!candidats.length) return null;
+      // Au plus près de l'école remplacée : le reste de la tournée a été
+      // construit autour de ce point, inutile de traverser la ville.
+      const d = (p) => calculateDistance(stop.lat, stop.lng, p.lat, p.lng);
+      candidats.sort((a, b) => {
+        const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return (b.publicScore || 1) - (a.publicScore || 1) || d(a) - d(b);
+      });
+      markUsed(candidats[0].name);
+      console.log(`[Écoles] ${dayPlan.day} : « ${stop.locationName} » remplacée par « ${candidats[0].name} » (hors période scolaire).`);
+      return candidats[0];
+    });
 
     // --- CENTRES ÉQUESTRES : mission dédiée mardi ou jeudi ---
     // La même personne assure la mission. La livraison de coupons est rapide,
@@ -2265,15 +2324,59 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       let morning   = day.stops.filter(s => toMinCov(s.time) < split);
       let afternoon = day.stops.filter(s => toMinCov(s.time) >= split);
 
-      // Double les lieux d'un créneau jusqu'à couvrir tous les secteurs.
-      // Jamais les écoles ni les centres équestres (livrés une seule fois).
-      // `secours` = les arrêts de l'autre créneau : quand l'IA ne rend que des
-      // arrêts du matin, l'après-midi déclaré restait VIDE dans le plan, faute
-      // de quoi que ce soit à dupliquer. C'est le créneau manquant remonté par
-      // les chauffeurs.
+      // Noms déjà programmés ce jour-là, matin et après-midi confondus : un
+      // même lieu ne doit pas revenir deux fois dans la journée.
+      const prisCeJour = new Set(day.stops.map(s => s.locationName));
+
+      /**
+       * Lieu encore inutilisé pour compléter un créneau. Choisi au plus près
+       * du dernier arrêt : quinze minutes de route séparent deux secteurs, un
+       * complément à l'autre bout de la ville serait intenable.
+       */
+      const nouveauLieu = (depuis) => {
+        const candidats = availablePOIs.filter(p =>
+          p.lat && p.lng &&
+          !prisCeJour.has(p.name) &&
+          canUse(p.name) &&
+          (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
+        );
+        if (!candidats.length) return null;
+        const dist = (p) => (depuis?.lat && depuis?.lng)
+          ? calculateDistance(depuis.lat, depuis.lng, p.lat, p.lng) : 0;
+        candidats.sort((a, b) => {
+          const pa = dist(a) <= 5 ? 0 : 1, pb = dist(b) <= 5 ? 0 : 1;
+          if (pa !== pb) return pa - pb;
+          return (b.publicScore || 1) - (a.publicScore || 1) || dist(a) - dist(b);
+        });
+        return candidats[0];
+      };
+
+      // Complète un créneau jusqu'à couvrir tous ses secteurs. On puise
+      // d'abord dans les lieux encore inutilisés : répéter trois fois le même
+      // boulevard de 14h à 17h n'apporte rien au chauffeur et se voyait sur le
+      // PDF. La duplication ne sert plus que de dernier recours, quand le
+      // vivier est réellement épuisé.
       const reutilisable = s => s.type !== 'school' && s.type !== 'equestrian';
       const padSlot = (arr, target, secours = []) => {
         if (arr.length >= target) return arr;
+
+        while (arr.length < target) {
+          const ref = arr[arr.length - 1] || secours[secours.length - 1] || null;
+          const neuf = nouveauLieu(ref);
+          if (!neuf) break;
+          arr.push({
+            time: ref?.time,
+            locationName: neuf.name, address: neuf.address, type: neuf.type,
+            lat: neuf.lat, lng: neuf.lng,
+            source: 'COMPLÉMENT (base OSM)',
+            marketDays: neuf.marketDays || [], hours: neuf.hours,
+          });
+          prisCeJour.add(neuf.name);
+          markUsed(neuf.name);
+        }
+        if (arr.length >= target) return arr;
+
+        // Vivier épuisé : on répète, en l'indiquant clairement.
         const propres = arr.filter(reutilisable);
         const source = propres.length ? propres : secours.filter(reutilisable);
         if (source.length === 0) return arr; // rien à dupliquer sans risque
