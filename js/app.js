@@ -357,14 +357,15 @@ function choisirMenuPOIs(pois, max = 50) {
     }
   }
 
-  // Tri global par potentiel d'impact : meilleurs lieux en priorité pour l'IA
-  // Cela assure que même avec des quotas égaux, l'IA voit les meilleurs lieux d'abord
-  menu.sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
+  // Diversifier le menu : mélanger scores hauts et modérés pour éviter que l'IA
+  // choisisse toujours les mêmes lieux (qui créent des répétitions).
+  // Garder les commerces de proximité pour la couverture sur les non-zones denses.
+  // (Ne pas trier globalement par score = garder la diversité géographique)
 
   const repartition = communes.map(c =>
     `${c.commune} ${menu.filter(p => paniers.get(c.commune).includes(p)).length}`
   ).join(', ');
-  console.log(`[Menu IA] ${menu.length} lieux répartis par impact — ${repartition}.`);
+  console.log(`[Menu IA] ${menu.length} lieux répartis (diversifiés) — ${repartition}.`);
   return menu.slice(0, max);
 }
 
@@ -1740,7 +1741,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     const USEFUL_TYPES = ['market', 'shopping', 'transport', 'competitor', 'sport', 'culture', 'medical'];
 
     // Compteur global d'utilisations — max 2 fois par POI sur toute la campagne
-    const MAX_POI_USES = 2;
+    const MAX_POI_USES = 1; // Pas de réutilisation : priorité à la diversité de couverture
     const poiUseCount = new Map(); // name → nb d'utilisations
     const canUse = (name) => (poiUseCount.get(name) || 0) < MAX_POI_USES;
     const markUsed = (name) => poiUseCount.set(name, (poiUseCount.get(name) || 0) + 1);
@@ -1748,10 +1749,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // Arrêts nécessitant un reverse-geocoding → traités en parallèle après la boucle
     const stopsNeedingAddr = [];
 
-    for (const day of data.dailyPlans) {
+    for (let dayIdx = 0; dayIdx < data.dailyPlans.length; dayIdx++) {
+      const day = data.dailyPlans[dayIdx];
       if (!day.stops) continue;
       const dayStr = (day.day || '').toLowerCase();
-      const isSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+      const isWeekSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+
+      // Vérifier si c'est une période de vacances scolaires
+      const dateISO = datesISO[dayIdx] || '';
+      const isHoliday = dateISO ? isSchoolHoliday(dateISO, schoolHolidays) : false;
+      const isSchoolDay = isWeekSchoolDay && !isHoliday; // écoles SEULEMENT en semaine ET hors vacances
 
       // Set des POIs déjà utilisés CE JOUR (évite doublons dans la même journée)
       const usedThisDay = new Set();
