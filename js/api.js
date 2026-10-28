@@ -1668,12 +1668,17 @@ function parsePOI(e, originLat, originLng) {
   // jusqu'ici le même score « shopping » alors qu'ils ne font pas passer le
   // même monde devant le véhicule. Le parking d'une grande surface est en
   // outre l'endroit le plus simple où stationner une camionnette.
-  const GROS_FLUX = new Set(['supermarket', 'mall', 'department_store', 'wholesale']);
-  if (GROS_FLUX.has(tags.shop)) publicScore += 5;
-  else if (tags.shop === 'convenience' || tags.shop === 'greengrocer') publicScore += 1;
+  // FOOTFALL MAXIMAL : lieux de haut passage (stratégie marketing optimale)
+  const FLUX_MAJEUR = new Set(['supermarket', 'mall', 'department_store', 'wholesale']);
+  if (FLUX_MAJEUR.has(tags.shop)) publicScore += 9; // +++ Fort footfall
+  // Lieux secondaires mais fréquentés
+  else if (tags.shop === 'convenience' || tags.shop === 'greengrocer' || tags.shop === 'bakery') publicScore += 2;
 
-  // Pôle d'échange : plusieurs lignes au même endroit, donc passage continu.
-  if (tags.public_transport === 'station' || tags.railway === 'station') publicScore += 3;
+  // Hubs de passage essentiels : gares, stations = flux continu et prévisible
+  if (tags.public_transport === 'station' || tags.railway === 'station') publicScore += 6;
+
+  // Places publiques et rues piétonnes : flux humain garanti, visibilité maximale
+  if (tags.place === 'square' || tags.highway === 'pedestrian') publicScore += 5;
 
   // Un lieu accessible en fauteuil est un lieu de plain-pied, visible depuis
   // la rue et desservi par un trottoir : bon indice de visibilité.

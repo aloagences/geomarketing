@@ -334,9 +334,16 @@ function choisirMenuPOIs(pois, max = 50) {
     panier.sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
   }
 
+  // Répartition optimisée par densité INSEE : les zones denses méritent plus d'arrêts
+  // car elles concentrent plus de potentiel de couverture.
   const menu = [];
   for (const c of communes) {
-    const quota = Math.max(1, Math.round((c.men / totalMen) * max));
+    let quota = Math.max(1, Math.round((c.men / totalMen) * max));
+    // Bonus densité : une commune très dense (+ de 10k hab) mérite plus d'arrêts
+    const densite = c.men / (Math.PI * 1 * 1); // ménages par km² approx (rayon 1km)
+    if (densite > 800) quota = Math.ceil(quota * 1.3); // +30% pour très haute densité
+    else if (densite > 400) quota = Math.ceil(quota * 1.15); // +15% pour haute densité
+
     menu.push(...paniers.get(c.commune).slice(0, quota));
   }
 
@@ -350,10 +357,14 @@ function choisirMenuPOIs(pois, max = 50) {
     }
   }
 
+  // Tri global par potentiel d'impact : meilleurs lieux en priorité pour l'IA
+  // Cela assure que même avec des quotas égaux, l'IA voit les meilleurs lieux d'abord
+  menu.sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
+
   const repartition = communes.map(c =>
     `${c.commune} ${menu.filter(p => paniers.get(c.commune).includes(p)).length}`
   ).join(', ');
-  console.log(`[Menu IA] ${menu.length} lieux répartis — ${repartition}.`);
+  console.log(`[Menu IA] ${menu.length} lieux répartis par impact — ${repartition}.`);
   return menu.slice(0, max);
 }
 
