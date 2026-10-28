@@ -418,7 +418,7 @@ async function openInseeMap(origin, radiusKm) {
       maxZoom: 19, subdomains: 'abc',
     }).addTo(_inseeMap);
   } else {
-    _inseeMap.eachLayer(l => { if (l instanceof L.Polygon || l instanceof L.Circle) _inseeMap.removeLayer(l); });
+    _inseeMap.eachLayer(l => { if (l instanceof L.Polygon || l instanceof L.Circle || l instanceof L.Marker) _inseeMap.removeLayer(l); });
   }
   _inseeMap.setView([origin.lat, origin.lng], 13);
   setTimeout(() => _inseeMap.invalidateSize(), 60);
@@ -445,6 +445,17 @@ async function openInseeMap(origin, radiusKm) {
   L.circle([origin.lat, origin.lng], {
     radius: radiusKm * 1000, color: '#0E2C59', weight: 2, dashArray: '6 6', fill: false,
   }).addTo(_inseeMap);
+
+  // Marqueur du point de départ (QG) pour se repérer
+  const markerQG = L.marker([origin.lat, origin.lng], {
+    interactive: true,
+    icon: L.divIcon({
+      className: 'custom-div-icon',
+      html: '<div style="background:#0E2C59;width:20px;height:20px;border-radius:50%;border:4px solid white;box-shadow:0 0 8px rgba(14,44,89,0.6)"></div>',
+      iconSize: [20, 20], iconAnchor: [10, 10],
+    }),
+  }).addTo(_inseeMap);
+  markerQG.bindTooltip('Point de départ (QG)', { permanent: false, direction: 'right' });
 
   _majStatsINSEE();
   return new Promise(r => { _inseeResolve = r; });
