@@ -1618,6 +1618,11 @@ MERCREDI & SAMEDI — ZONES COMMERCIALES & LOISIRS (STRATÉGIE OPTIMALE):
 - PRIORITÉ: type "shopping" (commerces, centres-ville) + type "culture" (cinémas, théâtres, musées) + type "park" (loisirs)
 - HORAIRES: 10h00-17h00 (heures d'ouverture commerciales complètes)
 - ÉVITER: zones résidentielles et isolées ces jours-là → privilégier le CŒUR DE VILLE
+
+SOIR (17h00+) — TRANSPORTS (Flux de retour du travail):
+- STRATÉGIE: La soirée privilégie les transports (gares, arrêts de bus) car le flux de retour est maximal
+- RÉPÉTITIONS ACCEPTÉES: Oui, le soir SEULEMENT pour les transports (gares, stations) → le même lieu d'échange peut être visité 2x
+- HEURES: 17h00-20h00 (heures de sortie bureaux et flux retour)
 MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
@@ -1744,10 +1749,17 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // Préférer les types utiles pour le chauffeur (commerces, transports)
     const USEFUL_TYPES = ['market', 'shopping', 'transport', 'competitor', 'sport', 'culture', 'medical'];
 
-    // Compteur global d'utilisations — max 2 fois par POI sur toute la campagne
-    const MAX_POI_USES = 1; // Pas de réutilisation : priorité à la diversité de couverture
+    // Compteur global d'utilisations — politique intelligente :
+    // - Jour : MAX 1 utilisation (diversité prioritaire)
+    // - Soir (17h+) transport : MAX 2 utilisations (flux de retour continu)
     const poiUseCount = new Map(); // name → nb d'utilisations
-    const canUse = (name) => (poiUseCount.get(name) || 0) < MAX_POI_USES;
+    const canUse = (name, poi = null, timeStr = null) => {
+      const count = poiUseCount.get(name) || 0;
+      const isEvening = timeStr ? /^(17|18|19|20|21|22)/.test(timeStr) : false;
+      const isTransport = poi?.type === 'transport';
+      const maxUses = (isEvening && isTransport) ? 2 : 1; // Répétition OK soir sur transports
+      return count < maxUses;
+    };
     const markUsed = (name) => poiUseCount.set(name, (poiUseCount.get(name) || 0) + 1);
 
     // Arrêts nécessitant un reverse-geocoding → traités en parallèle après la boucle
@@ -2363,10 +2375,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
        * complément à l'autre bout de la ville serait intenable.
        */
       const nouveauLieu = (depuis) => {
+        const timeStr = depuis?.time || '10:00';
         const candidats = availablePOIs.filter(p =>
           p.lat && p.lng &&
           !prisCeJour.has(p.name) &&
-          canUse(p.name) &&
+          canUse(p.name, p, timeStr) && // Passer le POI et l'heure pour la logique soir/transport
           (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
         );
         if (!candidats.length) return null;
