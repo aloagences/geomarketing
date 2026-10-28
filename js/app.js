@@ -1613,8 +1613,12 @@ JOURS: Tu DOIS générer EXACTEMENT ${duration} entrées dans dailyPlans, une pa
 HORAIRES: environ 1 arrêt par heure de créneau actif (ex. 10:00-13:00 → 3 arrêts). ATTENTION : chaque jour peut avoir des horaires DIFFÉRENTS. Si un créneau indique "PAS DE MATIN" ou "PAS D'APRÈS-MIDI", génère ZÉRO arrêt pour ce créneau.
 SECTEURS: chaque arrêt est un SECTEUR où le véhicule stationne 45 minutes. Choisis des lieux de VIE très fréquentés et visibles depuis la rue : commerces de centre-ville, arrêts de bus, gares, places et marchés. JAMAIS de zone d'activité, d'entrepôt ni de lieu isolé en rase campagne. Les horaires exacts sont recalculés automatiquement : donne un ordre de passage cohérent géographiquement, sans te soucier des minutes.
 DIVERSITÉ: Mélanger transport, shopping, school, competitor, sport, culture, park, medical. Max 2 du même type d'affilée.
-MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00. Ne jamais placer un marché un mardi, lundi, jeudi ou vendredi.
-CENTRES COMMERCIAUX: Les arrêts type "shopping" se planifient entre 12h00 et 14h00 les mercredis après-midi et samedis après-midi (pic d'affluence pause déjeuner et week-end).
+MERCREDI & SAMEDI — ZONES COMMERCIALES & LOISIRS (STRATÉGIE OPTIMALE):
+- OBJECTIF: Toucher les zones commerciales (boutiques, centres-ville), cinémas, lieux culturels, parcs et loisirs
+- PRIORITÉ: type "shopping" (commerces, centres-ville) + type "culture" (cinémas, théâtres, musées) + type "park" (loisirs)
+- HORAIRES: 10h00-17h00 (heures d'ouverture commerciales complètes)
+- ÉVITER: zones résidentielles et isolées ces jours-là → privilégier le CŒUR DE VILLE
+MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
 ANTI-DOUBLON: Aucune adresse répétée.
