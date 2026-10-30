@@ -629,95 +629,97 @@ function renderSignatureBlock(icon, color, label, start, end) {
 // ========================================
 
 /**
- * @param {Function} [remplacerLieu] - (stop, dayPlan) → POI de substitution.
- *   Hors période scolaire, l'ancienne version se contentait de retyper l'arrêt
- *   en « shopping » : le chauffeur restait envoyé devant une grille fermée,
- *   avec le nom de l'école en repère. Il faut un vrai lieu à la place.
+ * Jour de la semaine en français, calculé depuis la date ISO (fiable) et, à
+ * défaut, depuis le libellé du jour. Le libellé seul ne suffisait pas : l'IA
+ * le réécrit parfois, et un « startsWith » sur sa sortie laissait passer des
+ * écoles un mercredi.
  */
-function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remplacerLieu = null) {
+const JOURS_FR_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+const JOURS_ECOLE = ['lundi', 'mardi', 'jeudi', 'vendredi']; // fermées mercredi, samedi, dimanche
+
+function jourDeSemaine(dateISO, libelle = '') {
+  if (dateISO) {
+    const d = new Date(`${dateISO}T12:00:00`);
+    if (!isNaN(d)) return JOURS_FR_SEMAINE[d.getDay()];
+  }
+  const l = (libelle || '').toLowerCase();
+  return JOURS_FR_SEMAINE.find(j => l.includes(j)) || '';
+}
+
+const RE_NOM_ECOLE = /^\s*(ecole|école|groupe scolaire|maternelle|primaire|collège|college|lycée|lycee)\b/i;
+function estLieuEcole(nom, type) { return type === 'school' || RE_NOM_ECOLE.test(nom || ''); }
+const estArretEcole = (s) => estLieuEcole(s.locationName, s.type);
+
+/**
+ * Passe UNIQUE et définitive sur les écoles, à lancer une fois que plus rien
+ * ne remplace d'arrêts. Règles :
+ *  - lundi, mardi, jeudi, vendredi hors vacances seulement ;
+ *  - au plus UNE école le matin (sortie 11:15) et UNE l'après-midi (16:15),
+ *    seulement si ce créneau tient dans la plage horaire du jour ;
+ *  - toute autre école est remplacée par un vrai lieu (ou retirée si le
+ *    vivier est vide : le complément de couverture comblera le trou).
+ * @param {Function} [remplacerLieu] (stop, dayPlan, {jour,isSchoolDay,isHoliday}) → POI
+ * @returns {number[]} indices des jours où une école a été conservée
+ */
+function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remplacerLieu = null, perDayTimes = []) {
+  const joursAvecEcole = [];
+
   dailyPlans.forEach((dayPlan, idx) => {
-    const dayStr = (dayPlan.day || '').toLowerCase();
-    // Les écoles sont ouvertes lundi, mardi, jeudi, vendredi UNIQUEMENT
-    // (fermées mercredi, samedi, dimanche)
-    const schoolOpeningDays = ['lundi', 'mardi', 'jeudi', 'vendredi'];
-    const isWeekSchoolDay = schoolOpeningDays.some(day => dayStr.startsWith(day));
+    if (!dayPlan.stops?.length) return;
 
-    // Vérifier si c'est une période de vacances scolaires
     const dateISO = datesISO[idx] || '';
+    const jour = jourDeSemaine(dateISO, dayPlan.day);
     const isHoliday = dateISO ? isSchoolHoliday(dateISO, schoolHolidays) : false;
-    const isSchoolDay = isWeekSchoolDay && !isHoliday;
+    const isSchoolDay = JOURS_ECOLE.includes(jour) && !isHoliday;
 
-    if (!dayPlan.stops) return;
+    const t = perDayTimes[idx];
+    const tient = (debut, fin, heure) =>
+      !t || (_toMin(debut) <= _toMin(heure) && _toMin(heure) + 30 <= _toMin(fin));
+    const CRENEAUX = [
+      { cle: 'matin', heure: '11:15', ok: !t || (t.hasMorning && tient(t.mornStart, t.mornEnd, '11:15')), dans: s => _toMin(s.time) < 14 * 60 },
+      { cle: 'aprem', heure: '16:15', ok: !t || (t.hasAfternoon && tient(t.aftStart, t.aftEnd, '16:15')), dans: s => _toMin(s.time) >= 14 * 60 },
+    ];
 
-    let morningSchool = false;
-    let afternoonSchool = false;
+    const gardes = new Set();
+    const aRetirer = new Set();
 
     dayPlan.stops.forEach(stop => {
-      const isSchool = stop.type === 'school' ||
-        /ecole|école|scolaire/i.test(stop.locationName || '');
+      if (!estArretEcole(stop)) return;
 
-      if (!isSchool) return;
-
-      if (!isSchoolDay) {
-        // Vacances, mercredi ou week-end : la cour est vide et les grilles
-        // fermées. On substitue un vrai lieu de vie ; à défaut seulement, on
-        // retype l'arrêt pour qu'il ne soit pas traité comme une sortie
-        // d'école par la suite.
-        const remplacement = remplacerLieu?.(stop, dayPlan);
-
-        // Le callback peut retourner un objet (remplacement unique) ou un array (lot de lieux)
-        const lieux = Array.isArray(remplacement) ? remplacement : (remplacement ? [remplacement] : []);
-
-        if (lieux.length > 0) {
-          // Remplacer l'arrêt par le premier lieu
-          const neuf = lieux[0];
-          Object.assign(stop, {
-            locationName: neuf.name,
-            address: neuf.address,
-            type: neuf.type,
-            lat: neuf.lat,
-            lng: neuf.lng,
-            source: isHoliday ? 'VACANCES SCOLAIRES' : 'HORS JOUR D\'ÉCOLE',
-            marketDays: neuf.marketDays || [],
-            hours: neuf.hours,
-            landmarks: undefined, // recalculés plus tard sur le nouveau point
-          });
-
-          // Ajouter les lieux supplémentaires du lot (transport hub, supermarché, marché)
-          const baseTimeMin = _toMin(stop.time);
-          for (let i = 1; i < lieux.length; i++) {
-            const nextTimeMin = baseTimeMin + i * 45; // 45 min de présence pour chaque lieu
-            const nextTime = _toStr(nextTimeMin);
-            dayPlan.stops.push({
-              ...lieux[i],
-              time: nextTime,
-              timeEnd: _toStr(nextTimeMin + 30),
-              type: lieux[i].type,
-              source: 'LOT ÉCOLE FERMÉE',
-              locationName: lieux[i].name,
-              landmarks: undefined,
-            });
-          }
-        } else {
-          stop.type = 'shopping';
-        }
+      const creneau = CRENEAUX.find(c => c.dans(stop));
+      if (isSchoolDay && creneau?.ok && !gardes.has(creneau.cle)) {
+        gardes.add(creneau.cle);
+        stop.type = 'school';
+        stop.time = creneau.heure;
+        stop.timeEnd = _toStr(_toMin(creneau.heure) + 30);
         return;
       }
 
-      stop.type = 'school';
-      const hour = parseInt(stop.time.split(':')[0]);
-
-      if (hour < 14 && !morningSchool) {
-        stop.time = '11:15';
-        morningSchool = true;
-      } else if (hour >= 14 && !afternoonSchool) {
-        stop.time = '16:15';
-        afternoonSchool = true;
+      // Jour fermé, vacances, école en surnombre ou créneau hors plage.
+      const neuf = remplacerLieu?.(stop, dayPlan, { jour, isSchoolDay, isHoliday });
+      if (neuf) {
+        Object.assign(stop, {
+          locationName: neuf.name,
+          address: neuf.address,
+          type: neuf.type,
+          lat: neuf.lat,
+          lng: neuf.lng,
+          source: isHoliday ? 'VACANCES SCOLAIRES' : (isSchoolDay ? 'ÉCOLE EN SURNOMBRE' : 'HORS JOUR D\'ÉCOLE'),
+          marketDays: neuf.marketDays || [],
+          hours: neuf.hours,
+          landmarks: undefined, // recalculés plus tard sur le nouveau point
+        });
+        delete stop.timeEnd;
       } else {
-        stop.type = 'shopping';
+        aRetirer.add(stop);
       }
     });
+
+    if (aRetirer.size) dayPlan.stops = dayPlan.stops.filter(s => !aRetirer.has(s));
+    if (gardes.size) joursAvecEcole.push(idx);
   });
+
+  return joursAvecEcole;
 }
 
 // ========================================
@@ -1764,9 +1766,6 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       }
     });
 
-    // --- Garde-fou écoles (1er passage) ---
-    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays);
-
     // --- Validation topographique des arrêts ---
     setProgress('Génération des tracés réels...', 75);
 
@@ -1802,8 +1801,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     for (let dayIdx = 0; dayIdx < data.dailyPlans.length; dayIdx++) {
       const day = data.dailyPlans[dayIdx];
       if (!day.stops) continue;
-      const dayStr = (day.day || '').toLowerCase();
-      const isWeekSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+      const isWeekSchoolDay = JOURS_ECOLE.includes(jourDeSemaine(datesISO[dayIdx], day.day));
 
       // Vérifier si c'est une période de vacances scolaires
       const dateISO = datesISO[dayIdx] || '';
@@ -1975,6 +1973,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           // Candidat : dans le rayon de campagne ET non déjà utilisé
           const candidate = zonePOIs.find(p =>
             !usedNames.has(p.name) &&
+            !estLieuEcole(p.name, p.type) &&
             p.lat && p.lng &&
             distKmPriority(originObj.lat, originObj.lng, p.lat, p.lng) <= radius
           );
@@ -2023,7 +2022,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
       // Candidats situés dans la sélection, les plus fréquentés d'abord.
       const poolZone = availablePOIs
-        .filter(p => p.lat && p.lng && dansSelectionINSEE(p.lat, p.lng))
+        .filter(p => p.lat && p.lng && !estLieuEcole(p.name, p.type) && dansSelectionINSEE(p.lat, p.lng))
         .sort((a, b) => (b.publicScore || 1) - (a.publicScore || 1));
 
       // Commune de rattachement de chaque lieu et de chaque arrêt, pour que le
@@ -2297,91 +2296,88 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       });
     }
 
-    // --- Garde-fou écoles (2e passage post-topographie) ---
-    // À ce stade les arrêts ont leurs coordonnées réelles : on peut substituer
-    // un vrai commerce aux écoles tombant hors période scolaire.
-    enforceSchoolRules(data.dailyPlans, datesISO, schoolHolidays, (stop, dayPlan) => {
-      const prisCeJour = new Set((dayPlan.stops || []).map(s => s.locationName));
-      const candidats = availablePOIs.filter(p =>
-        p.lat && p.lng &&
-        p.type !== 'school' &&
-        !/ecole|école|scolaire|maternelle/i.test(p.name || '') &&
-        !prisCeJour.has(p.name) &&
-        canUse(p.name) &&
+    // --- Garde-fou écoles : passe unique, après toutes les substitutions ---
+    // (INSEE, zones prioritaires, SM…) qui pouvaient réinjecter des écoles.
+    const poiParNom = new Map(availablePOIs.map(p => [p.name, p]));
+    const marcheOuvert = (p, jour) => p.type === 'market' && !!jour && !!p.marketDays?.includes(jour);
+    const CATEGORIES_LOT = {
+      super:  (p) => !!p.isSuper,
+      hub:    (p) => !!p.isHub || p.type === 'transport',
+      marche: (p, jour) => marcheOuvert(p, jour),
+    };
+    const stopsOffre = {
+      super:  (stops) => stops.some(s => poiParNom.get(s.locationName)?.isSuper),
+      hub:    (stops) => stops.some(s => poiParNom.get(s.locationName)?.isHub || s.type === 'transport'),
+      marche: (stops, jour) => stops.some(s => s.type === 'market' && (!s.marketDays?.length || s.marketDays.includes(jour))),
+    };
+    const categoriesManquantes = (stops, jour) =>
+      Object.keys(CATEGORIES_LOT).filter(c => !stopsOffre[c](stops, jour));
+    const poolLibre = (dayPlan) => {
+      const pris = new Set((dayPlan.stops || []).map(s => s.locationName));
+      return availablePOIs.filter(p =>
+        p.lat && p.lng && !estLieuEcole(p.name, p.type) && !pris.has(p.name) &&
         (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
       );
-      if (!candidats.length) return null;
+    };
+    const meilleurProche = (liste, ref) => {
+      const d = (p) => (ref?.lat && ref?.lng) ? calculateDistance(ref.lat, ref.lng, p.lat, p.lng) : 0;
+      return [...liste].sort((a, b) =>
+        ((d(a) <= 3 ? 0 : 1) - (d(b) <= 3 ? 0 : 1))
+        || ((b.publicScore || 1) - (a.publicScore || 1))
+        || (d(a) - d(b)))[0];
+    };
 
-      const d = (p) => calculateDistance(stop.lat, stop.lng, p.lat, p.lng);
+    // Une école remplacée devient, par priorité, le supermarché, le hub de
+    // transport ou le marché alimentaire qui manque encore à la journée.
+    const remplacerEcole = (stop, dayPlan, ctx) => {
+      const base = poolLibre(dayPlan);
+      let libres = base.filter(p => canUse(p.name, p, stop.time));
+      if (!libres.length) libres = base; // mieux vaut un lieu repassé qu'une grille fermée
+      if (!libres.length) return null;
 
-      // Trouver un supermarché/hypermarché
-      const supermarches = candidats.filter(p =>
-        /supermarket|hypermarket|supermarché/i.test(p.type || '') ||
-        p.publicScore >= 7
-      ).sort((a, b) => {
-        const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
-        if (pa !== pb) return pa - pb;
-        return d(a) - d(b);
-      });
-
-      // Trouver un hub de transport (gare, station)
-      const transports = candidats.filter(p =>
-        /station|gare|bus|transport/i.test(p.name || '') ||
-        p.type === 'transit_station' || p.type === 'station'
-      ).sort((a, b) => {
-        const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
-        if (pa !== pb) return pa - pb;
-        return d(a) - d(b);
-      });
-
-      // Trouver un marché alimentaire
-      const marches = candidats.filter(p =>
-        /marché|market|farmers/i.test(p.name || '') ||
-        p.type === 'marketplace'
-      ).sort((a, b) => {
-        const pa = d(a) <= 2 ? 0 : 1, pb = d(b) <= 2 ? 0 : 1;
-        if (pa !== pb) return pa - pb;
-        return d(a) - d(b);
-      });
-
-      // Construire le lot : chercher le meilleur combo (commerce + transport + marché)
-      const lot = [];
-
-      // Ajouter le supermarché
-      if (supermarches.length > 0) {
-        lot.push(supermarches[0]);
-        markUsed(supermarches[0].name);
+      const autres = (dayPlan.stops || []).filter(s => s !== stop);
+      let choix = null;
+      for (const cat of categoriesManquantes(autres, ctx.jour)) {
+        const sel = libres.filter(p => CATEGORIES_LOT[cat](p, ctx.jour));
+        if (sel.length) { choix = meilleurProche(sel, stop); break; }
       }
+      choix = choix || meilleurProche(libres, stop);
+      markUsed(choix.name);
+      console.log(`[Écoles] ${dayPlan.day} : « ${stop.locationName} » remplacée par « ${choix.name} ».`);
+      return choix;
+    };
 
-      // Ajouter le hub de transport si disponible et différent
-      if (transports.length > 0 && (!lot.length || transports[0].name !== lot[0].name)) {
-        lot.push(transports[0]);
-        markUsed(transports[0].name);
-      }
+    const joursAvecEcole = enforceSchoolRules(
+      data.dailyPlans, datesISO, schoolHolidays, remplacerEcole, perDayTimes);
 
-      // Ajouter le marché si trouvé et différent
-      if (marches.length > 0 && !lot.some(p => p.name === marches[0].name)) {
-        lot.push(marches[0]);
-        markUsed(marches[0].name);
-      }
-
-      // Si on n'a pas trouvé de supermarché, prendre le meilleur commerce général
-      if (lot.length === 0) {
-        candidats.sort((a, b) => {
-          const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
-          if (pa !== pb) return pa - pb;
-          return (b.publicScore || 1) - (a.publicScore || 1) || d(a) - d(b);
+    // Jours d'école : on s'assure que la journée contient aussi un
+    // supermarché, un hub de transport et, si on en trouve un ouvert ce
+    // jour-là, un marché alimentaire — en sacrifiant les arrêts les moins bien
+    // notés, jamais les écoles, concurrents, centres équestres ni zones prioritaires.
+    joursAvecEcole.forEach(idx => {
+      const day = data.dailyPlans[idx];
+      const jour = jourDeSemaine(datesISO[idx], day.day);
+      for (const cat of categoriesManquantes(day.stops, jour)) {
+        const sel = poolLibre(day).filter(p => CATEGORIES_LOT[cat](p, jour) && canUse(p.name, p));
+        if (!sel.length) continue;
+        const sacrifiable = day.stops
+          .filter(s => !estArretEcole(s) && s.type !== 'equestrian' && s.type !== 'competitor'
+            && s.type !== 'transport' && s.type !== 'market'
+            && !poiParNom.get(s.locationName)?.isSuper
+            && !(priorityList.length > 0 && inPriorityZone(s.locationName, s.address, s.lat, s.lng)))
+          .sort((a, b) => (poiParNom.get(a.locationName)?.publicScore || 1) - (poiParNom.get(b.locationName)?.publicScore || 1))[0];
+        if (!sacrifiable) continue;
+        const choix = meilleurProche(sel, sacrifiable);
+        Object.assign(sacrifiable, {
+          locationName: choix.name, address: choix.address,
+          lat: choix.lat, lng: choix.lng, type: choix.type,
+          source: 'LOT JOUR D\'ÉCOLE',
+          marketDays: choix.marketDays || [], hours: choix.hours,
+          landmarks: undefined,
         });
-        if (candidats.length > 0) {
-          lot.push(candidats[0]);
-          markUsed(candidats[0].name);
-        }
+        markUsed(choix.name);
+        console.log(`[Écoles] ${day.day} : lot jour d'école, ajout ${cat} → « ${choix.name} ».`);
       }
-
-      if (lot.length === 0) return null;
-
-      console.log(`[Écoles] ${dayPlan.day} : « ${stop.locationName} » remplacée par un lot de ${lot.length} lieu(x) : ${lot.map(p => p.name).join(' + ')} (hors période scolaire).`);
-      return lot.length === 1 ? lot[0] : lot;
     });
 
     // --- CENTRES ÉQUESTRES : mission dédiée mardi ou jeudi ---
@@ -2472,6 +2468,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         const timeStr = depuis?.time || '10:00';
         const candidats = availablePOIs.filter(p =>
           p.lat && p.lng &&
+          !estLieuEcole(p.name, p.type) && // les écoles ne se placent que via enforceSchoolRules
           !prisCeJour.has(p.name) &&
           canUse(p.name, p, timeStr) && // Passer le POI et l'heure pour la logique soir/transport
           (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
