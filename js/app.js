@@ -663,8 +663,14 @@ function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remp
         // fermées. On substitue un vrai lieu de vie ; à défaut seulement, on
         // retype l'arrêt pour qu'il ne soit pas traité comme une sortie
         // d'école par la suite.
-        const neuf = remplacerLieu?.(stop, dayPlan);
-        if (neuf) {
+        const remplacement = remplacerLieu?.(stop, dayPlan);
+
+        // Le callback peut retourner un objet (remplacement unique) ou un array (lot de lieux)
+        const lieux = Array.isArray(remplacement) ? remplacement : (remplacement ? [remplacement] : []);
+
+        if (lieux.length > 0) {
+          // Remplacer l'arrêt par le premier lieu
+          const neuf = lieux[0];
           Object.assign(stop, {
             locationName: neuf.name,
             address: neuf.address,
@@ -676,6 +682,22 @@ function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remp
             hours: neuf.hours,
             landmarks: undefined, // recalculés plus tard sur le nouveau point
           });
+
+          // Ajouter les lieux supplémentaires du lot (transport hub, supermarché, marché)
+          const baseTimeMin = _toMin(stop.time);
+          for (let i = 1; i < lieux.length; i++) {
+            const nextTimeMin = baseTimeMin + i * 45; // 45 min de présence pour chaque lieu
+            const nextTime = _toStr(nextTimeMin);
+            dayPlan.stops.push({
+              ...lieux[i],
+              time: nextTime,
+              timeEnd: _toStr(nextTimeMin + 30),
+              type: lieux[i].type,
+              source: 'LOT ÉCOLE FERMÉE',
+              locationName: lieux[i].name,
+              landmarks: undefined,
+            });
+          }
         } else {
           stop.type = 'shopping';
         }
@@ -2289,17 +2311,77 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
       );
       if (!candidats.length) return null;
-      // Au plus près de l'école remplacée : le reste de la tournée a été
-      // construit autour de ce point, inutile de traverser la ville.
+
       const d = (p) => calculateDistance(stop.lat, stop.lng, p.lat, p.lng);
-      candidats.sort((a, b) => {
+
+      // Trouver un supermarché/hypermarché
+      const supermarches = candidats.filter(p =>
+        /supermarket|hypermarket|supermarché/i.test(p.type || '') ||
+        p.publicScore >= 7
+      ).sort((a, b) => {
         const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
         if (pa !== pb) return pa - pb;
-        return (b.publicScore || 1) - (a.publicScore || 1) || d(a) - d(b);
+        return d(a) - d(b);
       });
-      markUsed(candidats[0].name);
-      console.log(`[Écoles] ${dayPlan.day} : « ${stop.locationName} » remplacée par « ${candidats[0].name} » (hors période scolaire).`);
-      return candidats[0];
+
+      // Trouver un hub de transport (gare, station)
+      const transports = candidats.filter(p =>
+        /station|gare|bus|transport/i.test(p.name || '') ||
+        p.type === 'transit_station' || p.type === 'station'
+      ).sort((a, b) => {
+        const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return d(a) - d(b);
+      });
+
+      // Trouver un marché alimentaire
+      const marches = candidats.filter(p =>
+        /marché|market|farmers/i.test(p.name || '') ||
+        p.type === 'marketplace'
+      ).sort((a, b) => {
+        const pa = d(a) <= 2 ? 0 : 1, pb = d(b) <= 2 ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return d(a) - d(b);
+      });
+
+      // Construire le lot : chercher le meilleur combo (commerce + transport + marché)
+      const lot = [];
+
+      // Ajouter le supermarché
+      if (supermarches.length > 0) {
+        lot.push(supermarches[0]);
+        markUsed(supermarches[0].name);
+      }
+
+      // Ajouter le hub de transport si disponible et différent
+      if (transports.length > 0 && (!lot.length || transports[0].name !== lot[0].name)) {
+        lot.push(transports[0]);
+        markUsed(transports[0].name);
+      }
+
+      // Ajouter le marché si trouvé et différent
+      if (marches.length > 0 && !lot.some(p => p.name === marches[0].name)) {
+        lot.push(marches[0]);
+        markUsed(marches[0].name);
+      }
+
+      // Si on n'a pas trouvé de supermarché, prendre le meilleur commerce général
+      if (lot.length === 0) {
+        candidats.sort((a, b) => {
+          const pa = d(a) <= 3 ? 0 : 1, pb = d(b) <= 3 ? 0 : 1;
+          if (pa !== pb) return pa - pb;
+          return (b.publicScore || 1) - (a.publicScore || 1) || d(a) - d(b);
+        });
+        if (candidats.length > 0) {
+          lot.push(candidats[0]);
+          markUsed(candidats[0].name);
+        }
+      }
+
+      if (lot.length === 0) return null;
+
+      console.log(`[Écoles] ${dayPlan.day} : « ${stop.locationName} » remplacée par un lot de ${lot.length} lieu(x) : ${lot.map(p => p.name).join(' + ')} (hors période scolaire).`);
+      return lot.length === 1 ? lot[0] : lot;
     });
 
     // --- CENTRES ÉQUESTRES : mission dédiée mardi ou jeudi ---
