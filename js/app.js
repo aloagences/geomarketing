@@ -903,21 +903,28 @@ function applySectorTimes(dailyPlans, perDayTimes) {
           const d = Math.abs(_toMin(c.start) - target);
           if (d < bestDist) { bestDist = d; best = i; }
         });
-        if (best !== -1) {
+        if (best === -1) {
+          // Pas de cycle correspondant, prendre le premier libre
+          const free = cycles.map((_, i) => i).filter(i => !taken.has(i));
+          if (free.length > 0) {
+            best = free[0];
+            taken.add(best);
+          } else {
+            best = cycles.length - 1;
+          }
+        } else {
           taken.add(best);
-          // L'école garde son heure réelle ET sa durée de présence (30 min)
-          // On ne prend PAS la fin du cycle, mais la fin basée sur le temps réel
-          const schoolEnd = _toStr(_toMin(s.time) + 30); // 30 min de présence pour école
-          s.timeEnd = schoolEnd;
-          s._sector = _toMin(cycles[best].start);
         }
+        // L'école garde son heure réelle ET sa durée de présence (30 min)
+        s._sector = _toMin(cycles[best].start);
+        s.timeEnd = _toStr(_toMin(s.time) + 30);
       });
 
       // Les autres arrêts prennent les secteurs restants, dans l'ordre
       const free = cycles.map((_, i) => i).filter(i => !taken.has(i));
       let fi = 0;
       arr.forEach(s => {
-        if (s.type === 'school' && s._sector !== undefined) return;
+        if (s.type === 'school') return;
         const c = cycles[free[fi++]] || cycles[cycles.length - 1];
         s.time = c.start;
         s.timeEnd = c.end;
