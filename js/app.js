@@ -905,8 +905,10 @@ function applySectorTimes(dailyPlans, perDayTimes) {
         });
         if (best !== -1) {
           taken.add(best);
-          // L'école garde son heure réelle de sortie, la fin suit le secteur
-          s.timeEnd = cycles[best].end;
+          // L'école garde son heure réelle ET sa durée de présence (30 min)
+          // On ne prend PAS la fin du cycle, mais la fin basée sur le temps réel
+          const schoolEnd = _toStr(_toMin(s.time) + 30); // 30 min de présence pour école
+          s.timeEnd = schoolEnd;
           s._sector = _toMin(cycles[best].start);
         }
       });
