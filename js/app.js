@@ -637,7 +637,10 @@ function renderSignatureBlock(icon, color, label, start, end) {
 function enforceSchoolRules(dailyPlans, datesISO = [], schoolHolidays = [], remplacerLieu = null) {
   dailyPlans.forEach((dayPlan, idx) => {
     const dayStr = (dayPlan.day || '').toLowerCase();
-    const isWeekSchoolDay = /lundi|mardi|jeudi|vendredi/.test(dayStr);
+    // Les écoles sont ouvertes lundi, mardi, jeudi, vendredi UNIQUEMENT
+    // (fermées mercredi, samedi, dimanche)
+    const schoolOpeningDays = ['lundi', 'mardi', 'jeudi', 'vendredi'];
+    const isWeekSchoolDay = schoolOpeningDays.some(day => dayStr.startsWith(day));
 
     // Vérifier si c'est une période de vacances scolaires
     const dateISO = datesISO[idx] || '';
