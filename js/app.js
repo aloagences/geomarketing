@@ -391,6 +391,22 @@ function horairesLisibles(oh) {
  * Corps visible d'un arrêt (titre secteur + repères).
  * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
  */
+/** Ligne « stationnement » : où garer le véhicule quelques minutes (données OSM). */
+function parkingLineHTML(p) {
+  if (!p) return '';
+  if (p.aucun) {
+    return `<div class="text-xs text-gray-500 mt-1">&#x1F17F; Aucun stationnement répertorié à 150 m : arrêt court à confirmer sur place</div>`;
+  }
+  const details = [
+    p.gratuit === true ? 'gratuit' : p.gratuit === false ? 'payant' : '',
+    p.places ? `${p.places} places` : '',
+  ].filter(Boolean).join(' · ');
+  const lieu = p.type === 'voirie'
+    ? `en voirie${p.nom ? `, ${sanitize(p.nom)}` : ''}`
+    : `${sanitize(p.nom)} · ${p.distM} m`;
+  return `<div class="text-xs text-emerald-700 mt-1">&#x1F17F; Stationner : ${lieu}${details ? ` · ${details}` : ''}</div>`;
+}
+
 /** Ligne « trains » d'un arrêt en gare : horaires qui justifient la plage de présence. */
 function trainsLineHTML(tr) {
   if (!tr) return '';
@@ -453,6 +469,7 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
       </span>
     </div>
     ${trainsLineHTML(stop.trains)}
+    ${parkingLineHTML(stop.parking)}
     ${camionLineHTML(stop.stationnement)}`;
 }
 
@@ -2642,6 +2659,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     });
     data.camion = camion;
 
+    // --- STATIONNEMENT : un endroit où garer le véhicule quelques minutes ---
+    setProgress('Recherche des stationnements (OpenStreetMap)...', 82);
+    const stationnements = await trouverStationnements(data.dailyPlans, camion.height);
+    console.log(`[Stationnement] ${stationnements.avec} secteur(s) avec stationnement répertorié, ${stationnements.sans} sans.`);
+
     // --- GARES : caler la présence sur les arrivées / départs de trains (API SNCF) ---
     const trains = await calerGares(data.dailyPlans, perDayTimes, datesISO, jetonSNCF());
 
@@ -2897,6 +2919,10 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         'indisponible': 'L\'API SNCF est injoignable : les arrêts en gare ne sont pas calés sur les horaires de trains.',
       }[trains.etat];
       showMessage(msgTrains, 'warn');
+    }
+
+    if (!stationnements.ok) {
+      showMessage('Les stationnements n\'ont pas pu être recherchés (serveurs OpenStreetMap indisponibles) : repérez les places sur place.', 'warn');
     }
 
     if (!acces.verifie) {
