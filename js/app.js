@@ -391,6 +391,16 @@ function horairesLisibles(oh) {
  * Corps visible d'un arrêt (titre secteur + repères).
  * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
  */
+/** Ligne « trains » d'un arrêt en gare : horaires qui justifient la plage de présence. */
+function trainsLineHTML(tr) {
+  if (!tr) return '';
+  if (tr.aucun) {
+    return `<div class="text-xs text-amber-700 mt-1">&#x1F686; ${sanitize(tr.gare)} : aucun train sur ce créneau (horaires SNCF) — fréquentation faible</div>`;
+  }
+  const liste = (l) => l.length ? l.map(sanitize).join(' · ') : '—';
+  return `<div class="text-xs text-indigo-700 mt-1">&#x1F686; ${sanitize(tr.gare)} · sur place dès ${sanitize(tr.arriveeVehicule)} · arrivées ${liste(tr.arrivees)} · départs ${liste(tr.departs)}</div>`;
+}
+
 /** Ligne « stationnement camion » d'un arrêt (rue carrossable la plus proche). */
 function camionLineHTML(st) {
   if (!st) return '';
@@ -442,6 +452,7 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
         SRC: ${sanitize(srcLabel)}
       </span>
     </div>
+    ${trainsLineHTML(stop.trains)}
     ${camionLineHTML(stop.stationnement)}`;
 }
 
@@ -921,6 +932,50 @@ function buildCycles(startTime, endTime, n) {
  * Les arrêts école gardent leur horaire imposé et consomment le secteur qui
  * les contient, au lieu de décaler toute la grille.
  */
+/**
+ * Planification d'une demi-journée contenant des gares calées sur les horaires
+ * de trains (`_gare = {debut, fin}`). Les gares et les écoles gardent leur
+ * plage ; les autres arrêts se répartissent, par cycles de 60 min, dans les
+ * intervalles restants, en laissant 15 min de trajet autour de chaque plage
+ * imposée. Renvoie false sans rien modifier si les plages se chevauchent ou si
+ * les intervalles ne suffisent pas : l'appelant retombe alors sur la grille.
+ */
+function assignCalage(arr, startTime, endTime, origine) {
+  if (!arr.some(s => s._gare)) return false;
+  const W0 = _toMin(startTime), W1 = _toMin(endTime);
+
+  const imposes = arr
+    .filter(s => s._gare || s.type === 'school')
+    .map(s => s._gare
+      ? { s, debut: s._gare.debut, fin: s._gare.fin }
+      : { s, debut: _toMin(s.time), fin: _toMin(s.time) + 30 })
+    .sort((a, b) => a.debut - b.debut);
+  if (imposes.some(p => p.debut < W0 || p.fin > W1)) return false;
+  for (let i = 1; i < imposes.length; i++) {
+    if (imposes[i].debut < imposes[i - 1].fin + TRAVEL_MIN) return false;
+  }
+
+  const libres = arr.filter(s => !s._gare && s.type !== 'school');
+  const creneaux = creneauxLibres(W0, W1, imposes, { presence: PRESENCE_MIN, trajet: TRAVEL_MIN });
+  if (creneaux.length < libres.length) return false;
+
+  const plan = [
+    ...imposes.map(p => ({ debut: p.debut, fin: p.fin, s: p.s })),
+    ...creneaux.slice(0, libres.length).map(d => ({ debut: d, fin: d + PRESENCE_MIN, s: null })),
+  ].sort((a, b) => a.debut - b.debut);
+
+  const mobiles = ordonnerLibres(plan.map(p => p.s), libres, origine);
+  let k = 0;
+  plan.forEach(p => {
+    const s = p.s || mobiles[k++];
+    s.time = _toStr(p.debut);
+    s.timeEnd = _toStr(p.fin);
+    s._sector = p.debut;
+  });
+  arr.sort((a, b) => a._sector - b._sector);
+  return true;
+}
+
 function applySectorTimes(dailyPlans, perDayTimes, depart = null) {
   dailyPlans.forEach((day, idx) => {
     const t = perDayTimes[idx];
@@ -932,6 +987,8 @@ function applySectorTimes(dailyPlans, perDayTimes, depart = null) {
 
     const assign = (arr, startTime, endTime, origine) => {
       if (arr.length === 0) return;
+      if (assignCalage(arr, startTime, endTime, origine)) return;
+      arr.forEach(s => { delete s._gare; }); // gare non calable : grille classique
       const cycles = buildCycles(startTime, endTime, arr.length);
       if (cycles.length === 0) return;
 
@@ -1027,6 +1084,7 @@ function lieuDe(poi, source) {
     locationName: poi.name, address: poi.address,
     lat: poi.lat, lng: poi.lng, type: poi.type,
     source, marketDays: poi.marketDays || [], hours: poi.hours,
+    gare: !!poi.isGare,
   };
 }
 
@@ -1461,6 +1519,7 @@ async function handleGenerate() {
           type, lat: it.lat, lng: it.lng,
           distance: it.distance,
           publicScore: score, hasProperName: true, marketDays: [],
+          isGare: it.kind === 'Gare',
         });
       });
       verser(zoneLandmarks?.stations, 'transport', 12);
@@ -2583,6 +2642,9 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     });
     data.camion = camion;
 
+    // --- GARES : caler la présence sur les arrivées / départs de trains (API SNCF) ---
+    const trains = await calerGares(data.dailyPlans, perDayTimes, datesISO, jetonSNCF());
+
     // --- Passe finale : affectation des plages de secteur (time + timeEnd) ---
     // Exécutée en tout dernier, une fois le nombre d'arrêts définitivement figé
     // (après l'injection des centres équestres et le padding de couverture).
@@ -2825,6 +2887,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         + `commerces et des arrêts de transport.`,
         'warn'
       );
+    }
+
+    const aUneGare = data.dailyPlans.some(d => (d.stops || []).some(estGare));
+    if (aUneGare && trains.etat !== 'ok') {
+      const msgTrains = {
+        'sans-jeton': 'Des arrêts sont en gare, mais aucune clé API SNCF n\'est saisie : leur horaire n\'est pas calé sur les trains. Renseignez la clé SNCF (gratuite) dans le formulaire.',
+        'jeton-refuse': 'La clé API SNCF a été refusée : les arrêts en gare ne sont pas calés sur les horaires de trains. Vérifiez la clé.',
+        'indisponible': 'L\'API SNCF est injoignable : les arrêts en gare ne sont pas calés sur les horaires de trains.',
+      }[trains.etat];
+      showMessage(msgTrains, 'warn');
     }
 
     if (!acces.verifie) {

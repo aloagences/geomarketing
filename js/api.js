@@ -1686,6 +1686,7 @@ function parsePOI(e, originLat, originLng) {
     _premiumCenter: isPremiumCenter,
     isSuper: FLUX_MAJEUR.has(tags.shop) || tags.amenity === 'supermarket',
     isHub: tags.public_transport === 'station' || tags.railway === 'station',
+    isGare: tags.railway === 'station' || tags.railway === 'halt',
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
     hours: openingHours,
     marketDays, // jours où le marché est ouvert (vide pour les non-marchés)
