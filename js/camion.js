@@ -1,10 +1,12 @@
 // ========================================
 // VÉHICULE — gabarit, voies piétonnes, itinéraires
 // Flotte : fourgons (≤ 3,5 t) portant des affiches : 4 m de haut, largeur et
-// longueur de fourgon. API : Valhalla (moteur de routage OSM, sans clé) ; seul
-// son profil "truck" accepte une hauteur, on l'utilise donc avec un poids de
-// fourgon. Ponts bas, tunnels, rues trop étroites ou interdites sont évités ou
-// déclarés inaccessibles. Si le service est injoignable, rien n'est bloqué : le plan est
+// longueur d'utilitaire. API : Valhalla (moteur de routage OSM, sans clé). Seul
+// son profil "truck" accepte une hauteur, mais il applique aussi les
+// interdictions aux poids lourds, qui ne concernent PAS un utilitaire. Un arrêt
+// refusé en "truck" est donc retesté en "auto" : s'il passe, c'est une
+// interdiction poids lourd (sans effet pour nous) ou un gabarit limite — l'arrêt
+// est conservé et signalé « passage à vérifier » au lieu d'être remplacé. Si le service est injoignable, rien n'est bloqué : le plan est
 // livré avec la mention « contraintes camion non vérifiées ».
 // ========================================
 
@@ -54,7 +56,8 @@ async function valhalla(chemin, corps) {
   }
 }
 
-const _costing = (camion) => ({ costing: 'truck', costing_options: { truck: camion } });
+const _costing = (camion, profil = 'truck') =>
+  profil === 'auto' ? { costing: 'auto' } : { costing: 'truck', costing_options: { truck: camion } };
 const _pt = (p) => ({ lat: p.lat, lon: p.lng });
 
 /**
@@ -67,7 +70,7 @@ function meilleureVoie(edges) {
   let meilleure = null, meilleurScore = Infinity;
   for (const e of edges || []) {
     const usage = e.edge?.classification?.use;
-    if (!USAGES_CARROSSABLES.has(usage) || e.edge?.access?.truck === false) continue;
+    if (!USAGES_CARROSSABLES.has(usage) || e.edge?.access?.car === false) continue;
     if (CLASSES_SANS_ARRET.has(e.edge?.classification?.classification)) continue;
     if (e.distance > A_PIED_MAX_M) continue;
     // Un axe classé (résidentiel, secondaire…) est plus visible qu'une desserte.
@@ -125,10 +128,10 @@ function decoderPolyligne(texte) {
  * Itinéraire véhicule à travers `points` (dans l'ordre).
  * @returns {null | {ok: boolean, km?, min?, shape?, erreur?}} null = service injoignable
  */
-async function itineraireCamion(points, camion) {
+async function itineraireCamion(points, camion, profil = 'truck') {
   if (points.length < 2) return { ok: true, km: 0, min: 0, shape: [] };
   const rep = await valhalla('/route', {
-    locations: points.map(_pt), ..._costing(camion),
+    locations: points.map(_pt), ..._costing(camion, profil),
     directions_options: { units: 'km' },
   });
   if (!rep) return null;
@@ -180,18 +183,26 @@ async function verifierAccesCamion(dailyPlans, { origine, camion, remplacer, fix
 
     // 2. Itinéraire véhicule, jour par jour (en parallèle)
     const jours = await Promise.all(dailyPlans.map(async (day, i) => {
-      const stops = (day.stops || []).filter(s => s.stationnement?.lat && s.type !== 'equestrian');
+      const stops = (day.stops || []).filter(s => s.stationnement?.lat && !s.stationnement.passageAVerifier
+        && s.type !== 'equestrian');
       if (!stops.length) return [];
       const route = await itineraireCamion([origine, ...stops.map(s => s.stationnement)], camion);
       if (!route) return null;
       if (route.ok) return [];
       // Au moins un arrêt est inatteignable : on isole le ou les coupables.
-      const tests = await Promise.all(stops.map(async s => {
-        const r = await itineraireCamion([origine, s.stationnement], camion);
-        return r === null ? null : r.ok;
+      // Refusé en "truck" mais accepté en "auto" : interdiction poids lourd ou
+      // gabarit limite → conservé, signalé « passage à vérifier ».
+      const verdicts = await Promise.all(stops.map(async s => {
+        const camionRoute = await itineraireCamion([origine, s.stationnement], camion);
+        if (camionRoute === null) return null;
+        if (camionRoute.ok) return 'ok';
+        const autoRoute = await itineraireCamion([origine, s.stationnement], camion, 'auto');
+        if (autoRoute === null) return null;
+        return autoRoute.ok ? 'limite' : 'ko';
       }));
-      if (tests.includes(null)) return null;
-      return stops.filter((_, k) => !tests[k]).map(s => ({ s, i }));
+      if (verdicts.includes(null)) return null;
+      stops.forEach((s, k) => { if (verdicts[k] === 'limite') s.stationnement.passageAVerifier = true; });
+      return stops.filter((_, k) => verdicts[k] === 'ko').map(s => ({ s, i }));
     }));
     if (jours.includes(null)) return { verifie: false, remplaces, aVerifier: 0 };
     jours.flat().forEach(e => { delete e.s.stationnement; echecs.push(e); });
@@ -233,7 +244,10 @@ async function tracerItineraires(dailyPlans, origine, camion) {
       .filter(s => s.type !== 'equestrian')
       .map(s => (s.stationnement?.lat ? s.stationnement : s))
       .filter(p => p.lat && p.lng);
-    const route = pts.length ? await itineraireCamion([origine, ...pts], camion) : null;
+    if (!pts.length) { day.itineraire = null; return; }
+    const trajet = [origine, ...pts];
+    let route = await itineraireCamion(trajet, camion);
+    if (route && !route.ok) route = await itineraireCamion(trajet, camion, 'auto');
     day.itineraire = route?.ok ? { km: route.km, min: route.min, shape: route.shape } : null;
   }));
 }

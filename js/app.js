@@ -398,10 +398,12 @@ function camionLineHTML(st) {
     return `<div class="text-xs text-amber-700 mt-1">&#x26A0; Accès véhicule à vérifier sur place</div>`;
   }
   const rue = st.rue ? sanitize(st.rue) : 'rue carrossable la plus proche';
+  const passage = st.passageAVerifier
+    ? ` <span class="text-amber-700">&#x26A0; passage sous la hauteur du véhicule à vérifier</span>` : '';
   const aPied = st.aPiedM > 40
     ? ` · lieu à ~${Math.round(st.aPiedM / 10) * 10} m à pied (voie piétonne ou rue trop étroite)`
     : '';
-  return `<div class="text-xs text-sky-700 mt-1">&#x1F69A; Véhicule garé : ${rue}${aPied}</div>`;
+  return `<div class="text-xs text-sky-700 mt-1">&#x1F69A; Véhicule garé : ${rue}${aPied}${passage}</div>`;
 }
 
 function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
