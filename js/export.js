@@ -173,20 +173,3 @@ async function generateFullPDF(data, inputRefs) {
     lucide.createIcons();
   }
 }
-
-// ========================================
-// UTILITAIRES INTERNES
-// ========================================
-
-function downloadBlob(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
-}
-
-function safeName(str) {
-  return (str || 'export').replace(/[^a-zA-Z0-9]/g, '_');
-}

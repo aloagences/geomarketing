@@ -562,16 +562,6 @@ async function verifyCompetitorSIREN(brandName, lat, lng, radiusKm) {
   return null;
 }
 
-async function getRealRouteDistance(lat1, lng1, lat2, lng2) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data?.routes?.length > 0) return data.routes[0].distance / 1000;
-  } catch { /* fallback */ }
-  return calculateDistance(lat1, lng1, lat2, lng2);
-}
-
 // ========================================
 // OVERPASS API (OSM POIs) - avec fallback serveurs
 // ========================================

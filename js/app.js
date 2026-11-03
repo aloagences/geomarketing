@@ -905,7 +905,7 @@ function buildCycles(startTime, endTime, n) {
  * Les arrêts école gardent leur horaire imposé et consomment le secteur qui
  * les contient, au lieu de décaler toute la grille.
  */
-function applySectorTimes(dailyPlans, perDayTimes) {
+function applySectorTimes(dailyPlans, perDayTimes, depart = null) {
   dailyPlans.forEach((day, idx) => {
     const t = perDayTimes[idx];
     if (!t || !day.stops?.length) return;
@@ -914,13 +914,14 @@ function applySectorTimes(dailyPlans, perDayTimes) {
     const morning   = day.stops.filter(s => _toMin(s.time) < split);
     const afternoon = day.stops.filter(s => _toMin(s.time) >= split);
 
-    const assign = (arr, startTime, endTime) => {
+    const assign = (arr, startTime, endTime, origine) => {
       if (arr.length === 0) return;
       const cycles = buildCycles(startTime, endTime, arr.length);
       if (cycles.length === 0) return;
 
       // Les horaires imposés (école) réservent le secteur le plus proche
       const taken = new Set();
+      const fixes = new Array(cycles.length).fill(null);
       arr.forEach(s => {
         if (s.type !== 'school') return;
         const target = _toMin(s.time);
@@ -942,16 +943,18 @@ function applySectorTimes(dailyPlans, perDayTimes) {
         } else {
           taken.add(best);
         }
+        fixes[best] = s;
         // L'école garde son heure réelle ET sa durée de présence (30 min)
         s._sector = _toMin(cycles[best].start);
         s.timeEnd = _toStr(_toMin(s.time) + 30);
       });
 
-      // Les autres arrêts prennent les secteurs restants, dans l'ordre
+      // Les autres arrêts prennent les secteurs restants, dans l'ordre de
+      // passage le plus court au départ de l'origine (ou du dernier arrêt).
       const free = cycles.map((_, i) => i).filter(i => !taken.has(i));
+      const mobiles = ordonnerLibres(fixes, arr.filter(s => s.type !== 'school'), origine);
       let fi = 0;
-      arr.forEach(s => {
-        if (s.type === 'school') return;
+      mobiles.forEach(s => {
         const c = cycles[free[fi++]] || cycles[cycles.length - 1];
         s.time = c.start;
         s.timeEnd = c.end;
@@ -961,8 +964,9 @@ function applySectorTimes(dailyPlans, perDayTimes) {
       arr.sort((a, b) => (a._sector ?? _toMin(a.time)) - (b._sector ?? _toMin(b.time)));
     };
 
-    assign(morning,   t.mornStart, t.mornEnd);
-    assign(afternoon, t.aftStart,  t.aftEnd);
+    assign(morning, t.mornStart, t.mornEnd, depart);
+    // L'après-midi reprend là où le matin s'est arrêté.
+    assign(afternoon, t.aftStart, t.aftEnd, morning[morning.length - 1] || depart);
 
     day.stops = [...morning, ...afternoon];
   });
@@ -1000,6 +1004,21 @@ function redistributeStops(stops, startTime, endTime) {
 // ========================================
 // GÉNÉRATION PRINCIPALE
 // ========================================
+
+/** Champs d'un arrêt à partir d'un lieu du pool. */
+function lieuDe(poi, source) {
+  return {
+    locationName: poi.name, address: poi.address,
+    lat: poi.lat, lng: poi.lng, type: poi.type,
+    source, marketDays: poi.marketDays || [], hours: poi.hours,
+  };
+}
+
+/** Points (lat/lng) des arrêts de tous les jours SAUF celui d'index `idx`. */
+function stopsAutresJours(dailyPlans, idx) {
+  return dailyPlans.flatMap((d, i) =>
+    i === idx ? [] : (d.stops || []).filter(s => s.lat && s.lng));
+}
 
 async function handleGenerate() {
   showMessage('');
@@ -1657,12 +1676,12 @@ MERCREDI & SAMEDI — ZONES COMMERCIALES & LOISIRS (STRATÉGIE OPTIMALE):
 
 SOIR (17h00+) — TRANSPORTS (Flux de retour du travail):
 - STRATÉGIE: La soirée privilégie les transports (gares, arrêts de bus) car le flux de retour est maximal
-- RÉPÉTITIONS ACCEPTÉES: Oui, le soir SEULEMENT pour les transports (gares, stations) → le même lieu d'échange peut être visité 2x
 - HEURES: 17h00-20h00 (heures de sortie bureaux et flux retour)
 MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
-ANTI-DOUBLON: Aucune adresse répétée.
+ANTI-DOUBLON STRICT: un même lieu (ou deux lieux à moins de 100 m) ne figure JAMAIS deux fois dans la même journée. Un lieu peut revenir un AUTRE jour (gare, mairie) uniquement si la BASE OSM manque de lieux.
+COUVERTURE: le véhicule doit circuler sur TOUT le périmètre : chaque jour vise un secteur différent, avec des arrêts enchaînés dans l'ordre le plus court (pas d'allers-retours d'un bout à l'autre de la zone).
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
 ${smActive ? `STREET MARKETING COUPLÉ: Les jours marqués [STREET MARKETING] le VÉHICULE doit concentrer TOUS ses arrêts dans un rayon de 3 km autour du centre de ${smCityRaw}. Ces jours-là, génère AUSSI un tableau "smStops" (4 à 6 arrêts piétons) avec des rues commerçantes, places, hubs de transport ou marchés de ${smCityRaw}. Les smStops ont le même format que stops mais type parmi : pedestrian|square|transport|market.` : ''}
 JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}],"smStops":[]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
@@ -1849,11 +1868,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           });
           if (idx !== -1) {
             const real = availablePOIs[idx];
-            Object.assign(stop, {
-              locationName: real.name, address: real.address,
-              lat: real.lat, lng: real.lng, type: real.type, source: 'OSM',
-              marketDays: real.marketDays || [], hours: real.hours,
-            });
+            Object.assign(stop, lieuDe(real, 'OSM'));
             usedThisDay.add(real.name);
             markUsed(real.name);
             isLegit = true;
@@ -1887,22 +1902,15 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && canUse(p.name) && !usedThisDay.has(p.name));
           // 5. N'importe quel POI non utilisé ce jour, quota non atteint
           if (idx === -1) idx = findFallback(p => canUse(p.name) && !usedThisDay.has(p.name));
-          // 6. Réutilisation au-delà du quota (max 2x déjà atteint) — dernier recours avant geocoding random
+          // 6. Quota global atteint : on repasse sur un lieu déjà vu un AUTRE jour
+          // (gare, mairie…) plutôt que de laisser un trou. Jamais deux fois le
+          // même lieu dans une journée : la règle est stricte.
           if (idx === -1) idx = findFallback(p => USEFUL_TYPES.includes(p.type) && !usedThisDay.has(p.name));
           if (idx === -1) idx = findFallback(p => !usedThisDay.has(p.name));
-          if (idx === -1) idx = findFallback(() => true);
-          // Pool non vide → toujours préférer un lieu réel, même une école hors
-          // jour scolaire, plutôt que de retomber sur le repli centre-ville.
-          if (idx === -1) idx = 0;
 
           if (idx !== -1) {
             const fb = availablePOIs[idx];
-            Object.assign(stop, {
-              locationName: fb.name, address: fb.address,
-              lat: fb.lat, lng: fb.lng, type: fb.type,
-              source: 'CORRECTION (Base OSM)',
-              marketDays: fb.marketDays || [], hours: fb.hours,
-            });
+            Object.assign(stop, lieuDe(fb, 'CORRECTION (Base OSM)'));
             usedThisDay.add(fb.name);
             markUsed(fb.name);
             isLegit = true;
@@ -1995,15 +2003,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (replaceIdx === -1) continue;
 
           const savedTime = day.stops[replaceIdx].time;
-          Object.assign(day.stops[replaceIdx], {
-            locationName: candidate.name,
-            address: candidate.address,
-            lat: candidate.lat,
-            lng: candidate.lng,
-            type: candidate.type,
-            source: 'ZONE PRIORITAIRE',
-            marketDays: candidate.marketDays || [], hours: candidate.hours,
-          });
+          Object.assign(day.stops[replaceIdx], lieuDe(candidate, 'ZONE PRIORITAIRE'));
           day.stops[replaceIdx].time = savedTime;
           usedNames.add(candidate.name);
           console.log(`[Priorité] ${day.day} zone "${priorityList[zi]}" → ${candidate.name} (${distKmPriority(originObj.lat, originObj.lng, candidate.lat, candidate.lng).toFixed(1)}km)`);
@@ -2086,15 +2086,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           if (nouvelle) compte.set(nouvelle, (compte.get(nouvelle) || 0) + 1);
 
           prisCeJour.delete(s.locationName);
-          Object.assign(s, {
-            locationName: remplacant.name,
-            address: remplacant.address,
-            lat: remplacant.lat,
-            lng: remplacant.lng,
-            type: remplacant.type,
-            source: 'ZONE INSEE',
-            marketDays: remplacant.marketDays || [], hours: remplacant.hours,
-          });
+          Object.assign(s, lieuDe(remplacant, 'ZONE INSEE'));
           prisCeJour.add(remplacant.name);
           markUsed(remplacant.name);
           replaces++;
@@ -2264,6 +2256,14 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         });
       }
 
+      // Ces arrêts gardent la tête du créneau quand la passe finale optimise
+      // l'ordre de passage (le marché se tient tôt, les centres commerciaux
+      // sont à privilégier dès 14 h).
+      if (isWedOrSat) {
+        morning.forEach(s => { if (s.type === 'market') s._premier = true; });
+        afternoon.forEach(s => { if (['shopping', 'competitor'].includes(s.type)) s._premier = true; });
+      }
+
       // Réappliquer les temps dans le nouvel ordre
       const mornTimes = morning.map(s => s.time);
       const aftTimes  = afternoon.map(s => s.time);
@@ -2300,6 +2300,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     // (INSEE, zones prioritaires, SM…) qui pouvaient réinjecter des écoles.
     const poiParNom = new Map(availablePOIs.map(p => [p.name, p]));
     const marcheOuvert = (p, jour) => p.type === 'market' && !!jour && !!p.marketDays?.includes(jour);
+    // Un lieu peut-il être ajouté automatiquement ce jour-là ? Ni école (gérées
+    // par enforceSchoolRules), ni marché fermé, ni lieu hors des carreaux INSEE.
+    const peutPlacerCeJour = (p, jour) =>
+      !estLieuEcole(p.name, p.type)
+      && (p.type !== 'market'
+        || (p.marketDays?.length ? p.marketDays.includes(jour) : ['mercredi', 'samedi'].includes(jour)))
+      && (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng));
     const CATEGORIES_LOT = {
       super:  (p) => !!p.isSuper,
       hub:    (p) => !!p.isHub || p.type === 'transport',
@@ -2368,13 +2375,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
           .sort((a, b) => (poiParNom.get(a.locationName)?.publicScore || 1) - (poiParNom.get(b.locationName)?.publicScore || 1))[0];
         if (!sacrifiable) continue;
         const choix = meilleurProche(sel, sacrifiable);
-        Object.assign(sacrifiable, {
-          locationName: choix.name, address: choix.address,
-          lat: choix.lat, lng: choix.lng, type: choix.type,
-          source: 'LOT JOUR D\'ÉCOLE',
-          marketDays: choix.marketDays || [], hours: choix.hours,
-          landmarks: undefined,
-        });
+        Object.assign(sacrifiable, lieuDe(choix, 'LOT JOUR D\'ÉCOLE'), { landmarks: undefined });
         markUsed(choix.name);
         console.log(`[Écoles] ${day.day} : lot jour d'école, ajout ${cat} → « ${choix.name} ».`);
       }
@@ -2455,93 +2456,96 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       let morning   = day.stops.filter(s => toMinCov(s.time) < split);
       let afternoon = day.stops.filter(s => toMinCov(s.time) >= split);
 
-      // Noms déjà programmés ce jour-là, matin et après-midi confondus : un
-      // même lieu ne doit pas revenir deux fois dans la journée.
-      const prisCeJour = new Set(day.stops.map(s => s.locationName));
+      const jour = jourDeSemaine(datesISO[idx], day.day);
 
       /**
-       * Lieu encore inutilisé pour compléter un créneau. Choisi au plus près
-       * du dernier arrêt : quinze minutes de route séparent deux secteurs, un
-       * complément à l'autre bout de la ville serait intenable.
+       * Lieu encore inutilisé pour compléter un créneau, choisi par
+       * `choisirLieu` (couverture de zone, tournée compacte, trajet tenable).
+       * On puise d'abord dans les lieux jamais visités ; à défaut, dans ceux
+       * déjà vus un AUTRE jour (gare, mairie : acceptable quand le vivier est
+       * maigre). Jamais un lieu déjà programmé ce jour-là.
        */
       const nouveauLieu = (depuis) => {
         const timeStr = depuis?.time || '10:00';
-        const candidats = availablePOIs.filter(p =>
-          p.lat && p.lng &&
-          !estLieuEcole(p.name, p.type) && // les écoles ne se placent que via enforceSchoolRules
-          !prisCeJour.has(p.name) &&
-          canUse(p.name, p, timeStr) && // Passer le POI et l'heure pour la logique soir/transport
-          (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng))
-        );
-        if (!candidats.length) return null;
-        const dist = (p) => (depuis?.lat && depuis?.lng)
-          ? calculateDistance(depuis.lat, depuis.lng, p.lat, p.lng) : 0;
-        candidats.sort((a, b) => {
-          const pa = dist(a) <= 5 ? 0 : 1, pb = dist(b) <= 5 ? 0 : 1;
-          if (pa !== pb) return pa - pb;
-          return (b.publicScore || 1) - (a.publicScore || 1) || dist(a) - dist(b);
-        });
-        return candidats[0];
+        const options = {
+          dejaLa: [...morning, ...afternoon],
+          utilisations: poiUseCount,
+          perimetre: radius,
+          visites: stopsAutresJours(data.dailyPlans, idx),
+          ref: depuis,
+          accepte: (p) => peutPlacerCeJour(p, jour),
+        };
+        return choisirLieu(availablePOIs, { ...options, dispo: (p) => canUse(p.name, p, timeStr) })
+          || choisirLieu(availablePOIs, options);
       };
 
-      // Complète un créneau jusqu'à couvrir tous ses secteurs. On puise
-      // d'abord dans les lieux encore inutilisés : répéter trois fois le même
-      // boulevard de 14h à 17h n'apporte rien au chauffeur et se voyait sur le
-      // PDF. La duplication ne sert plus que de dernier recours, quand le
-      // vivier est réellement épuisé.
-      const reutilisable = s => s.type !== 'school' && s.type !== 'equestrian';
+      // Complète un créneau jusqu'à couvrir tous ses secteurs avec des lieux
+      // DISTINCTS. Si le vivier est épuisé pour cette journée, le créneau reste
+      // plus court : mieux vaut un secteur de moins qu'un lieu répété.
       const padSlot = (arr, target, secours = []) => {
-        if (arr.length >= target) return arr;
-
         while (arr.length < target) {
           const ref = arr[arr.length - 1] || secours[secours.length - 1] || null;
           const neuf = nouveauLieu(ref);
           if (!neuf) break;
-          arr.push({
-            time: ref?.time,
-            locationName: neuf.name, address: neuf.address, type: neuf.type,
-            lat: neuf.lat, lng: neuf.lng,
-            source: 'COMPLÉMENT (base OSM)',
-            marketDays: neuf.marketDays || [], hours: neuf.hours,
-          });
-          prisCeJour.add(neuf.name);
+          arr.push({ time: ref?.time, ...lieuDe(neuf, 'COMPLÉMENT (base OSM)') });
           markUsed(neuf.name);
-        }
-        if (arr.length >= target) return arr;
-
-        // Vivier épuisé : on répète, en l'indiquant clairement.
-        const propres = arr.filter(reutilisable);
-        const source = propres.length ? propres : secours.filter(reutilisable);
-        if (source.length === 0) return arr; // rien à dupliquer sans risque
-        const etiquette = propres.length ? '2e passage' : 'report de créneau';
-        let i = 0;
-        while (arr.length < target) {
-          arr.push({ ...source[i % source.length], source: etiquette });
-          i++;
         }
         return arr;
       };
 
-      // Les deux créneaux se servent l'un de l'autre : on fige donc une copie
-      // du matin avant de le compléter, sinon l'après-midi se remplirait avec
-      // les doublons qu'on vient d'ajouter au matin.
-      const matinInitial = morning.slice();
       if (t.hasMorning) {
         morning = padSlot(morning, sectorCount(t.mornStart, t.mornEnd), afternoon);
         redistributeStops(morning, t.mornStart, t.mornEnd);
       }
       if (t.hasAfternoon) {
-        afternoon = padSlot(afternoon, sectorCount(t.aftStart, t.aftEnd), matinInitial);
+        afternoon = padSlot(afternoon, sectorCount(t.aftStart, t.aftEnd), morning);
         redistributeStops(afternoon, t.aftStart, t.aftEnd);
       }
 
       day.stops = [...morning, ...afternoon];
     }
 
+    // --- UNICITÉ STRICTE PAR JOUR ---
+    // Dernier filet : quelle que soit l'étape qui l'a réintroduit (IA, INSEE,
+    // zones prioritaires, équestre, complément), un lieu ne figure jamais deux
+    // fois dans la même journée — même nom, ou même emplacement à 30 m près.
+    // Le doublon est remplacé par un lieu jamais visité de préférence ; un
+    // lieu déjà vu un autre jour (gare, mairie) reste acceptable si le vivier
+    // est maigre ; faute de mieux le secteur est retiré.
+    let doublonsRemplaces = 0, doublonsRetires = 0;
+    data.dailyPlans.forEach((day, idx) => {
+      if (!day.stops?.length) return;
+      const jour = jourDeSemaine(datesISO[idx], day.day);
+      const visites = stopsAutresJours(data.dailyPlans, idx);
+      const res = dedoublonnerJour(day.stops, {
+        fixe: (s) => s.type === 'equestrian' || estArretEcole(s),
+        remplacer: (s, retenus) => {
+          const options = {
+            dejaLa: retenus, utilisations: poiUseCount, perimetre: radius,
+            visites, ref: s, accepte: (p) => peutPlacerCeJour(p, jour),
+          };
+          const neuf = choisirLieu(availablePOIs, { ...options, dispo: (p) => canUse(p.name, p, s.time) })
+            || choisirLieu(availablePOIs, options);
+          if (!neuf) return false;
+          console.log(`[Unicité] ${day.day} : « ${s.locationName} » en double → « ${neuf.name} ».`);
+          Object.assign(s, lieuDe(neuf, 'DOUBLON ÉVITÉ'), { landmarks: undefined });
+          markUsed(neuf.name);
+          return true;
+        },
+      });
+      day.stops = res.stops;
+      doublonsRemplaces += res.remplaces;
+      doublonsRetires += res.retires;
+    });
+
     // --- Passe finale : affectation des plages de secteur (time + timeEnd) ---
     // Exécutée en tout dernier, une fois le nombre d'arrêts définitivement figé
     // (après l'injection des centres équestres et le padding de couverture).
-    applySectorTimes(data.dailyPlans, perDayTimes);
+    applySectorTimes(data.dailyPlans, perDayTimes, originObj);
+
+    const bilan = bilanTournee(data.dailyPlans, originObj);
+    console.log(`[Tournée] km/jour: ${bilan.km.join(' · ')} — secteurs de la zone couverts: ${bilan.octants}/8 — `
+      + `doublons du jour: ${bilan.doublons} (${doublonsRemplaces} remplacé(s), ${doublonsRetires} retiré(s))`);
 
     // --- Repères visuels : commerces identifiables autour de chaque secteur ---
     const landmarkPool = [...filteredPOIs, ...preVerifiedCompetitors];
@@ -2782,8 +2786,8 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
               + `les arrêts sont repliés sur l'adresse de départ. Ce plan n'est PAS exploitable tel quel — `
               + `relancez la génération dans quelques minutes. `
             : `Plan généré avec ${n} lieu(x) pour ${besoin} arrêts à couvrir. `)
-        + `Tous les créneaux sont couverts, mais certains secteurs sont repassés plusieurs fois `
-        + `(mentions « 2e passage » et « report de créneau »). Relancez dans quelques minutes `
+        + `Un lieu n'est jamais répété dans la même journée : certains lieux reviennent donc sur `
+        + `plusieurs jours et des secteurs peuvent rester vides. Relancez dans quelques minutes `
         + `pour un plan plus varié, ou élargissez le rayon.`,
         'warn'
       );

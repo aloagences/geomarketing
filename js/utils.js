@@ -20,13 +20,6 @@ function sanitize(str) {
     .replace(/'/g, '&#x27;');
 }
 
-/**
- * Crée un élément texte sûr (jamais interprété comme HTML).
- */
-function safeText(str) {
-  return document.createTextNode(str || '');
-}
-
 // ========================================
 // STOCKAGE LOCAL SÉCURISÉ
 // ========================================
