@@ -56,11 +56,19 @@ function drawMap(data, origin, radiusKm) {
       iconAnchor: [6, 6],
     });
 
+    // Itinéraire poids lourd du jour (Valhalla), quand il a pu être calculé
+    if (day.itineraire?.shape?.length) {
+      L.polyline(day.itineraire.shape, { color, weight: 3, opacity: 0.55 }).addTo(markersLayer);
+    }
+
     (day.stops || []).forEach(s => {
       if (!isNaN(s.lat) && !isNaN(s.lng)) {
-        L.marker([s.lat, s.lng], { icon })
+        // Le marqueur se place là où le camion stationne (rue carrossable)
+        const st = s.stationnement?.lat ? s.stationnement : null;
+        const camion = st ? `<br><span style="font-size:10px;color:#0369a1">&#x1F69A; ${sanitize(st.rue || 'rue carrossable')}</span>` : '';
+        L.marker([st ? st.lat : s.lat, st ? st.lng : s.lng], { icon })
           .addTo(markersLayer)
-          .bindPopup(`<b>${sanitize(s.time)} - ${sanitize(s.locationName)}</b><br><span style="font-size:10px;color:gray">${sanitize(s.address)}</span>`);
+          .bindPopup(`<b>${sanitize(s.time)} - ${sanitize(s.locationName)}</b><br><span style="font-size:10px;color:gray">${sanitize(s.address)}</span>${camion}`);
         heatPoints.push([s.lat, s.lng, 1]);
       }
     });

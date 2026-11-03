@@ -391,6 +391,19 @@ function horairesLisibles(oh) {
  * Corps visible d'un arrêt (titre secteur + repères).
  * Partagé par renderStopHTML et saveStop pour garder les deux rendus identiques.
  */
+/** Ligne « stationnement camion » d'un arrêt (rue carrossable la plus proche). */
+function camionLineHTML(st) {
+  if (!st) return '';
+  if (st.aVerifier) {
+    return `<div class="text-xs text-amber-700 mt-1">&#x26A0; Accès véhicule à vérifier sur place</div>`;
+  }
+  const rue = st.rue ? sanitize(st.rue) : 'rue carrossable la plus proche';
+  const aPied = st.aPiedM > 40
+    ? ` · lieu à ~${Math.round(st.aPiedM / 10) * 10} m à pied (voie piétonne ou rue trop étroite)`
+    : '';
+  return `<div class="text-xs text-sky-700 mt-1">&#x1F69A; Véhicule garé : ${rue}${aPied}</div>`;
+}
+
 function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
   const street = streetLabel(stop.address) || stop.address || '';
   const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
@@ -426,7 +439,8 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
       <span class="text-[10px] text-gray-300 uppercase tracking-widest border-l border-gray-200 pl-2 ml-1">
         SRC: ${sanitize(srcLabel)}
       </span>
-    </div>`;
+    </div>
+    ${camionLineHTML(stop.stationnement)}`;
 }
 
 function renderStopHTML(stop, distBadge) {
@@ -1658,6 +1672,7 @@ async function handleGenerate() {
         + `au même endroit : le véhicule doit avoir couvert toute la zone en fin de période.`
       : `PROXIMITÉ: 60% des arrêts dans "${targetCity}" à moins de 2.0 km.`;
 
+    const vehiculePrompt = lireCamion();
     const systemInstruction = `Tu es un expert en géomarketing. Renvoie UNIQUEMENT du JSON pur.
 RAYON MAX: ${radius} km autour de (${originObj.lat}, ${originObj.lng}).
 ${exclusionInstruction}
@@ -1680,6 +1695,7 @@ SOIR (17h00+) — TRANSPORTS (Flux de retour du travail):
 MARCHÉS: Les arrêts type "market" se planifient UNIQUEMENT les mercredis et samedis matin (jours de marché traditionnels en France), à partir de 10h00.
 ÉCOLES: EXCLUSIVEMENT Lundi, Mardi, Jeudi, Vendredi HORS vacances scolaires. Horaires imposés : matin "11:15" (sortie 11h15-11h30), après-midi "16:15" (sortie 16h15-16h30). ${holidayInfo}
 ${competitorInstruction}
+VÉHICULE: fourgon de ${vehiculePrompt.length} m × ${vehiculePrompt.width} m portant des affiches, HAUTEUR TOTALE ${vehiculePrompt.height} m. Il ne peut PAS entrer dans les rues piétonnes, les centres anciens étroits, les parkings couverts ni sous un pont ou passage bas (< ${vehiculePrompt.height} m). Choisis des lieux desservis par des axes larges ; une rue perpendiculaire à une voie piétonne convient pour stationner.
 ANTI-DOUBLON STRICT: un même lieu (ou deux lieux à moins de 100 m) ne figure JAMAIS deux fois dans la même journée. Un lieu peut revenir un AUTRE jour (gare, mairie) uniquement si la BASE OSM manque de lieux.
 COUVERTURE: le véhicule doit circuler sur TOUT le périmètre : chaque jour vise un secteur différent, avec des arrêts enchaînés dans l'ordre le plus court (pas d'allers-retours d'un bout à l'autre de la zone).
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
@@ -2538,10 +2554,39 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       doublonsRetires += res.retires;
     });
 
+    // --- ACCÈS VÉHICULE (API Valhalla) ---
+    // Fourgon portant des affiches, 4 m de haut au total : chaque arrêt doit
+    // avoir une rue carrossable à proximité (jamais la voie piétonne elle-même,
+    // mais une rue perpendiculaire convient) et rester atteignable avec le
+    // gabarit saisi. Un arrêt refusé est remplacé par un lieu accessible.
+    setProgress('Vérification du gabarit véhicule (Valhalla)...', 80);
+    const camion = lireCamion();
+    const acces = await verifierAccesCamion(data.dailyPlans, {
+      origine: originObj,
+      camion,
+      fixe: (s) => estArretEcole(s),
+      remplacer: (s, i, refuses) => {
+        const dayPlan = data.dailyPlans[i];
+        const jour = jourDeSemaine(datesISO[i], dayPlan.day);
+        const options = {
+          dejaLa: dayPlan.stops, utilisations: poiUseCount, perimetre: radius,
+          visites: stopsAutresJours(data.dailyPlans, i), ref: s,
+          accepte: (p) => !refuses.has(p.name) && peutPlacerCeJour(p, jour),
+        };
+        const neuf = choisirLieu(availablePOIs, { ...options, dispo: (p) => canUse(p.name, p, s.time) })
+          || choisirLieu(availablePOIs, options);
+        if (neuf) markUsed(neuf.name);
+        return neuf;
+      },
+    });
+    data.camion = camion;
+
     // --- Passe finale : affectation des plages de secteur (time + timeEnd) ---
     // Exécutée en tout dernier, une fois le nombre d'arrêts définitivement figé
     // (après l'injection des centres équestres et le padding de couverture).
     applySectorTimes(data.dailyPlans, perDayTimes, originObj);
+
+    if (acces.verifie) await tracerItineraires(data.dailyPlans, originObj, camion);
 
     const bilan = bilanTournee(data.dailyPlans, originObj);
     console.log(`[Tournée] km/jour: ${bilan.km.join(' · ')} — secteurs de la zone couverts: ${bilan.octants}/8 — `
@@ -2556,7 +2601,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     }
 
     // --- Rendu HTML sécurisé ---
-    setProgress('Calcul itinéraire routier (OSRM)...', 85);
+    setProgress('Itinéraires véhicule (Valhalla)...', 85);
 
     let plansHtml = '';
     let outOfBoundsCount = 0;
@@ -2693,6 +2738,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
             <div class="flex flex-col">
               <h4 class="font-extrabold text-3xl ${isSmDay ? 'text-cyan-900' : 'text-[#0E2C59]'} capitalize mb-1">${sanitize(day.day)}</h4>
               <span class="text-sm font-bold uppercase ${isSmDay ? 'text-cyan-600' : 'text-gray-500'} tracking-widest">${sanitize(day.role || 'VÉHICULE')}</span>
+              ${day.itineraire ? `<span class="text-xs font-semibold text-sky-700 mt-1">&#x1F69A; ${day.itineraire.km} km de route · ≈ ${day.itineraire.min} min de conduite</span>` : ''}
             </div>
             <div class="flex flex-wrap gap-2 items-center">
               ${smBadgeHtml}
@@ -2753,6 +2799,11 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     el.mapStats.innerHTML = `<span class="${statusOk ? 'text-[#4ade80]' : 'text-amber-300'} flex items-center">
       <span class="mr-1">${statusOk ? '&#x2713;' : '&#x1F699;'}</span>
       ${statusOk ? 'Distances routières 100% OK' : 'Itinéraires de route calculés'}
+    </span>
+    <span class="${acces.verifie ? 'text-[#4ade80]' : 'text-amber-300'} flex items-center ml-4">
+      ${acces.verifie
+        ? `&#x1F69A; Hauteur ${camion.height} m vérifiée${acces.remplaces ? ` · ${acces.remplaces} arrêt(s) remplacé(s)` : ''}`
+        : '&#x1F69A; Gabarit non vérifié'}
     </span>`;
 
     if (data.attendance?.length > 0) {
@@ -2770,6 +2821,14 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         + `seulement ${inseeHorsZone.disponibles} lieu(x) exploitables ont été trouvés à l'intérieur des `
         + `carreaux sélectionnés. Élargissez la sélection sur la carte du potentiel pour y gagner des `
         + `commerces et des arrêts de transport.`,
+        'warn'
+      );
+    }
+
+    if (!acces.verifie) {
+      showMessage(
+        `Les contraintes du véhicule (hauteur ${camion.height} m, voies piétonnes) n'ont pas pu être vérifiées : `
+        + `le service de routage est injoignable. Vérifiez les accès à la main ou relancez dans quelques minutes.`,
         'warn'
       );
     }
