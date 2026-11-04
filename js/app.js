@@ -411,7 +411,7 @@ function parkingLineHTML(p) {
 function trainsLineHTML(tr) {
   if (!tr) return '';
   if (tr.aucun) {
-    return `<div class="text-xs text-amber-700 mt-1">&#x1F686; ${sanitize(tr.gare)} : aucun train sur ce créneau (horaires SNCF) — fréquentation faible</div>`;
+    return `<div class="text-xs text-amber-700 mt-1">&#x1F686; ${sanitize(tr.gare)} : aucun train sur ce créneau (horaires prévus SNCF) — fréquentation faible</div>`;
   }
   const liste = (l) => l.length ? l.map(sanitize).join(' · ') : '—';
   return `<div class="text-xs text-indigo-700 mt-1">&#x1F686; ${sanitize(tr.gare)} · sur place dès ${sanitize(tr.arriveeVehicule)} · arrivées ${liste(tr.arrivees)} · départs ${liste(tr.departs)}</div>`;
@@ -2665,7 +2665,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
     console.log(`[Stationnement] ${stationnements.avec} secteur(s) avec stationnement répertorié, ${stationnements.sans} sans.`);
 
     // --- GARES : caler la présence sur les arrivées / départs de trains (API SNCF) ---
-    const trains = await calerGares(data.dailyPlans, perDayTimes, datesISO, jetonSNCF());
+    const trains = await calerGares(data.dailyPlans, perDayTimes, datesISO);
 
     // --- Passe finale : affectation des plages de secteur (time + timeEnd) ---
     // Exécutée en tout dernier, une fois le nombre d'arrêts définitivement figé
@@ -2913,12 +2913,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
 
     const aUneGare = data.dailyPlans.some(d => (d.stops || []).some(estGare));
     if (aUneGare && trains.etat !== 'ok') {
-      const msgTrains = {
-        'sans-jeton': 'Des arrêts sont en gare, mais aucune clé API SNCF n\'est saisie : leur horaire n\'est pas calé sur les trains. Renseignez la clé SNCF (gratuite) dans le formulaire.',
-        'jeton-refuse': 'La clé API SNCF a été refusée : les arrêts en gare ne sont pas calés sur les horaires de trains. Vérifiez la clé.',
-        'indisponible': 'L\'API SNCF est injoignable : les arrêts en gare ne sont pas calés sur les horaires de trains.',
-      }[trains.etat];
-      showMessage(msgTrains, 'warn');
+      const fr = (iso) => new Date(iso).toLocaleDateString('fr-FR');
+      showMessage({
+        'indisponible': 'Des arrêts sont en gare, mais le fichier des horaires de trains (data/gares-sncf.json) est introuvable : ils ne sont pas calés sur les trains.',
+        'hors-periode': `Des arrêts sont en gare, mais les horaires SNCF intégrés ne couvrent que du ${fr(trains.periode?.debut)} au ${fr(trains.periode?.fin)} : ces dates ne sont pas calées sur les trains. Régénérez le fichier avec un GTFS plus récent (tools/build_gares_sncf.py).`,
+      }[trains.etat], 'warn');
+    } else if (aUneGare && trains.horsPeriode?.size) {
+      showMessage(`Certaines dates dépassent la période des horaires SNCF intégrés (jusqu'au ${new Date(trains.periode.fin).toLocaleDateString('fr-FR')}) : leurs gares ne sont pas calées sur les trains.`, 'warn');
     }
 
     if (!stationnements.ok) {

@@ -15,7 +15,7 @@ const LANES_STATIONNEMENT = /^(parallel|diagonal|perpendicular|marked)$/;
 const INTERDIT = /^(no_parking|no_stopping|no_standing|no)$/;
 
 /** Éléments Overpass d'une requête (course entre serveurs), ou null. */
-async function overpassElements(query, delaiMs = 12000) {
+async function overpassElements(query, delaiMs = 25000) {
   if (overpassInjoignable()) return null;
   const body = 'data=' + encodeURIComponent(query);
   try {
@@ -127,8 +127,8 @@ async function trouverStationnements(dailyPlans, hauteur) {
   const arrets = dailyPlans.flatMap(d => (d.stops || []).filter(s => s.lat && s.lng && s.type !== 'equestrian'));
   const points = arrets.map(s => (s.stationnement?.lat ? s.stationnement : s));
   const elements = [];
-  for (let i = 0; i < points.length; i += 15) {
-    const lot = await overpassElements(requeteStationnement(points.slice(i, i + 15)));
+  for (let i = 0; i < points.length; i += 10) {
+    const lot = await overpassElements(requeteStationnement(points.slice(i, i + 10)));
     if (!lot) return { ok: false, avec: 0, sans: 0 };
     elements.push(...lot);
   }

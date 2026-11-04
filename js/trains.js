@@ -1,33 +1,17 @@
 // ========================================
 // TRAINS — caler la présence du véhicule en gare sur les arrivées / départs
-// API : SNCF (Navitia) — horaires théoriques et temps réel de toutes les gares.
-// Jeton gratuit (https://numerique.sncf.com/startup/api/) à saisir dans le
-// formulaire ; sans jeton, rien ne change : l'arrêt garde son créneau.
+// Source : GTFS SNCF (open data, transport.data.gouv.fr), compacté dans
+// data/gares-sncf.json par tools/build_gares_sncf.py. Aucune clé, aucun appel
+// réseau externe : ce sont les horaires PRÉVUS, valables pour n'importe quelle
+// date de la période couverte par le fichier.
 // ========================================
 
-const NAVITIA_URL = 'https://api.sncf.com/v1/coverage/sncf';
+const GARES_URL = 'data/gares-sncf.json';
 const GARE_RAYON_M = 600;
 /** Présence en gare : le véhicule arrive avant le train, pas pile à l'heure. */
 const GARE_PRESENCE_MIN = 45;
 const GARE_AVANCE_MIN = 10;
 const GARE_TRAJET_MIN = 15;
-
-const STORAGE_SNCF = 'sncf_api_key';
-
-function jetonSNCF() {
-  return (document.getElementById('sncfToken')?.value || '').trim();
-}
-
-/** Mémorise le jeton saisi et le restaure à l'ouverture. */
-function initJetonSNCF() {
-  const input = document.getElementById('sncfToken');
-  if (!input) return;
-  const saved = safeGetItem(STORAGE_SNCF);
-  if (saved && !input.value) input.value = saved;
-  input.addEventListener('change', () => safeSetItem(STORAGE_SNCF, input.value.trim()));
-}
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initJetonSNCF);
-else initJetonSNCF();
 
 /** Une gare (pas un arrêt de bus ni de tram) ? */
 function estGare(stop) {
@@ -36,71 +20,59 @@ function estGare(stop) {
   return /\bgare\b/i.test(nom) && !/routi[eè]re|bus|tram/i.test(nom);
 }
 
+let _promesseGares = null;
 /**
- * Appel Navitia. `null` = service injoignable ; `{auth: true}` = jeton refusé.
+ * Charge le fichier des horaires (une seule fois, puis le cache du navigateur).
+ * Renvoie la base décodée, ou null si le fichier est absent ou illisible.
  */
-async function navitia(chemin, jeton) {
-  try {
-    const res = await fetch(NAVITIA_URL + chemin, {
-      headers: { Authorization: 'Basic ' + btoa(jeton + ':') },
-    });
-    if (res.status === 401 || res.status === 403) return { auth: true };
-    if (!res.ok) return res.status === 404 ? { introuvable: true } : null;
-    return { json: await res.json() };
-  } catch {
-    return null;
+function chargerGares() {
+  if (!_promesseGares) {
+    _promesseGares = fetch(GARES_URL)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(d => ({
+        debut: d.debut, fin: d.fin,
+        debutMs: Date.UTC(...d.debut.split('-').map((v, i) => i === 1 ? v - 1 : +v)),
+        nbJours: Math.round((Date.parse(d.fin) - Date.parse(d.debut)) / 86400000) + 1,
+        gares: d.gares, services: d.services, evenements: d.evenements,
+      }))
+      .catch((e) => { console.warn('[Trains] horaires indisponibles :', e.message); _promesseGares = null; return null; });
   }
+  return _promesseGares;
 }
 
-const _garesTrouvees = new Map();
-/** Gare SNCF (stop_area) la plus proche d'un point, ou null. */
-async function trouverGareSNCF(lat, lng, jeton) {
-  const cle = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-  if (_garesTrouvees.has(cle)) return _garesTrouvees.get(cle);
-  const rep = await navitia(
-    `/coords/${lng};${lat}/places_nearby?type[]=stop_area&distance=${GARE_RAYON_M}&count=5`, jeton);
-  if (!rep?.json) return rep;                                   // erreur : on la remonte
-  const gare = (rep.json.places_nearby || [])
-    .find(p => p.embedded_type === 'stop_area' && /^stop_area:SNCF:/.test(p.id));
-  const res = gare ? { id: gare.id, nom: gare.name } : { introuvable: true };
-  _garesTrouvees.set(cle, res);
-  return res;
+/** Distance en mètres (haversine suffisante à cette échelle : approximation plane). */
+function _distM(lat1, lng1, lat2, lng2) {
+  const x = (lng2 - lng1) * Math.cos((lat1 + lat2) * Math.PI / 360);
+  return Math.hypot(x, lat2 - lat1) * 111190;
 }
 
-/** « 20261105T101500 » → minutes depuis minuit, si c'est bien la date voulue. */
-function _minutesNavitia(dt, dateISO) {
-  if (!dt || dt.slice(0, 8) !== dateISO.replace(/-/g, '')) return null;
-  return parseInt(dt.slice(9, 11), 10) * 60 + parseInt(dt.slice(11, 13), 10);
+/** Gare SNCF la plus proche d'un point, à moins de GARE_RAYON_M, ou null. */
+function garePlusProche(base, lat, lng) {
+  let meilleure = null, dMin = GARE_RAYON_M;
+  base.gares.forEach((g, i) => {
+    const d = _distM(lat, lng, g[2], g[3]);
+    if (d < dMin) { dMin = d; meilleure = { idx: i, uic: g[0], nom: g[1] }; }
+  });
+  return meilleure;
 }
 
-const _horaires = new Map();
 /**
- * Arrivées et départs d'une gare pour un jour donné.
- * Horaires théoriques pour les jours à venir, temps réel pour aujourd'hui.
- * @returns {Promise<{arrivees: number[], departs: number[]} | object | null>}
+ * Arrivées et départs prévus d'une gare pour un jour (minutes depuis minuit).
+ * `{horsPeriode: true}` si la date sort de la période couverte par le fichier.
  */
-async function horairesGare(idGare, dateISO, jeton) {
-  const cle = `${idGare}|${dateISO}`;
-  if (_horaires.has(cle)) return _horaires.get(cle);
-
-  const aujourdhui = new Date().toISOString().slice(0, 10) === dateISO;
-  const q = `?from_datetime=${dateISO.replace(/-/g, '')}T000000&duration=86400&count=400`
-    + `&data_freshness=${aujourdhui ? 'realtime' : 'base_schedule'}`;
-  const [dep, arr] = await Promise.all([
-    navitia(`/stop_areas/${idGare}/departures${q}`, jeton),
-    navitia(`/stop_areas/${idGare}/arrivals${q}`, jeton),
-  ]);
-  for (const r of [dep, arr]) if (!r || r.auth) return r;
-
-  const trier = (liste, champ) => [...new Set((liste || [])
-    .map(x => _minutesNavitia(x.stop_date_time?.[champ], dateISO))
-    .filter(m => m !== null))].sort((a, b) => a - b);
-  const res = {
-    arrivees: trier(arr.json?.arrivals, 'arrival_date_time'),
-    departs: trier(dep.json?.departures, 'departure_date_time'),
-  };
-  _horaires.set(cle, res);
-  return res;
+function horairesGare(base, gare, dateISO) {
+  const i = Math.round((Date.parse(dateISO) - base.debutMs) / 86400000);
+  if (!(i >= 0 && i < base.nbJours)) return { horsPeriode: true };
+  const circule = (svc) => (parseInt(base.services[svc][i >> 2], 16) >> (3 - (i & 3))) & 1;
+  const arrivees = new Set(), departs = new Set();
+  let v = 0;
+  for (const delta of base.evenements[gare.idx]) {
+    v += delta;                                           // événements triés, stockés en différences
+    if (!circule(Math.floor(v / 8192))) continue;
+    const m = (v % 8192) >> 2;
+    ((v & 3) === 1 ? arrivees : departs).add(m);
+  }
+  return { arrivees: [...arrivees].sort((a, b) => a - b), departs: [...departs].sort((a, b) => a - b) };
 }
 
 /**
@@ -174,11 +146,13 @@ const _hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m 
  * demi-journée mais en a dans l'autre, l'arrêt échange sa place avec un arrêt
  * ordinaire de l'autre demi-journée.
  *
- * @returns {Promise<{etat: 'ok'|'sans-jeton'|'jeton-refuse'|'indisponible', calees: number, sansTrain: number}>}
+ * @returns {Promise<{etat: 'ok'|'indisponible'|'hors-periode', calees: number, sansTrain: number, horsPeriode: Set<string>, periode?: {debut: string, fin: string}}>}
  */
-async function calerGares(dailyPlans, perDayTimes, datesISO, jeton) {
-  const bilan = { etat: 'ok', calees: 0, sansTrain: 0 };
-  if (!jeton) return { ...bilan, etat: 'sans-jeton' };
+async function calerGares(dailyPlans, perDayTimes, datesISO) {
+  const bilan = { etat: 'ok', calees: 0, sansTrain: 0, horsPeriode: new Set() };
+  const base = await chargerGares();
+  if (!base) return { ...bilan, etat: 'indisponible' };
+  bilan.periode = { debut: base.debut, fin: base.fin };
 
   const toMin = (t) => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
   const COUPURE = 14 * 60;
@@ -193,16 +167,13 @@ async function calerGares(dailyPlans, perDayTimes, datesISO, jeton) {
 
     const garesDuJour = new Set();
     for (const stop of day.stops.filter(s => estGare(s) && s.lat && s.lng && s.type !== 'school')) {
-      const gare = await trouverGareSNCF(stop.lat, stop.lng, jeton);
-      if (!gare) return { ...bilan, etat: 'indisponible' };
-      if (gare.auth) return { ...bilan, etat: 'jeton-refuse' };
-      if (gare.introuvable) continue;                         // arrêt qui n'est pas une gare SNCF
-      if (garesDuJour.has(gare.id)) continue;                 // même gare deux fois : la 2e reste ordinaire
-      garesDuJour.add(gare.id);
+      const gare = garePlusProche(base, stop.lat, stop.lng);
+      if (!gare) continue;                                    // arrêt qui n'est pas une gare SNCF
+      if (garesDuJour.has(gare.uic)) continue;                // même gare deux fois : la 2e reste ordinaire
+      garesDuJour.add(gare.uic);
 
-      const horaires = await horairesGare(gare.id, dateISO, jeton);
-      if (!horaires) return { ...bilan, etat: 'indisponible' };
-      if (horaires.auth) return { ...bilan, etat: 'jeton-refuse' };
+      const horaires = horairesGare(base, gare, dateISO);
+      if (horaires.horsPeriode) { bilan.horsPeriode.add(dateISO); continue; }
 
       const occupes = (matin) => day.stops
         .filter(s => s !== stop && (toMin(s.time) < COUPURE) === matin)
@@ -245,5 +216,6 @@ async function calerGares(dailyPlans, perDayTimes, datesISO, jeton) {
         + `${creneau.arrivees.length} arrivée(s), ${creneau.departs.length} départ(s).`);
     }
   }
+  if (bilan.horsPeriode.size && !bilan.calees && !bilan.sansTrain) bilan.etat = 'hors-periode';
   return bilan;
 }
