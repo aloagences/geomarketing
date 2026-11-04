@@ -16,7 +16,9 @@ Format du fichier produit :
   services       un masque de jours par service, en hexadécimal : le bit i vaut 1 si le
                  service circule le jour (debut + i)
   evenements     pour chaque gare (même ordre que « gares »), une liste d'entiers triés
-                 service * 8192 + minute * 4 + genre   (genre 1 = arrivée, 2 = départ),
+                 service * 16384 + minute * 8 + classe * 4 + genre
+                 genre  1 = arrivée, 2 = départ ; classe  1 = grandes lignes (TGV, OUIGO,
+                 Intercités, ICE, Lyria : beaucoup de voyageurs), 0 = TER et autres ;
                  minute = minutes depuis minuit, de 04:00 à 23:59 seulement,
                  stockés en DIFFÉRENCES successives (cumul à la lecture) : fichier 3x plus léger
 """
@@ -29,7 +31,14 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 MIN_JOUR, MAX_JOUR = 4 * 60, 24 * 60 - 1
-TYPE_TRAIN = '2'          # route_type GTFS : 2 = train (les autocars TER et les tramways sont écartés)
+TYPE_TRAIN = '2'          # route_type GTFS : 2 = train
+GRANDES_LIGNES = ('TGV', 'OUIGO', 'INTERCITES', 'ICE', 'Lyria')
+NON_TRAINS = ('Car', 'Navette')     # autocars TER et navettes : ce ne sont pas des arrivées de train
+
+
+def categorie(stop_id):
+    """« StopPoint:OCETGV INOUI-87746008 » → « TGV INOUI »."""
+    return stop_id.split(':', 1)[-1].removeprefix('OCE').rsplit('-', 1)[0]
 
 
 def lire(zf, nom):
@@ -88,15 +97,19 @@ def main():
         gare = gare_de(r['stop_id'])
         if gare is None:
             continue
+        cat = categorie(r['stop_id'])
+        if cat.startswith(NON_TRAINS):
+            continue
+        classe = 1 if cat.startswith(GRANDES_LIGNES) else 0
         svc = index_service[sid]
         if r['drop_off_type'] != '1' and r['arrival_time']:
             m = minutes(r['arrival_time'])
             if MIN_JOUR <= m <= MAX_JOUR:
-                evenements[gare].add(svc * 8192 + m * 4 + 1)
+                evenements[gare].add(svc * 16384 + m * 8 + classe * 4 + 1)
         if r['pickup_type'] != '1' and r['departure_time']:
             m = minutes(r['departure_time'])
             if MIN_JOUR <= m <= MAX_JOUR:
-                evenements[gare].add(svc * 8192 + m * 4 + 2)
+                evenements[gare].add(svc * 16384 + m * 8 + classe * 4 + 2)
 
     gares, liste = [], []
     for gare_id, evs in sorted(evenements.items()):

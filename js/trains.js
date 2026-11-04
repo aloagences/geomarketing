@@ -64,15 +64,31 @@ function horairesGare(base, gare, dateISO) {
   const i = Math.round((Date.parse(dateISO) - base.debutMs) / 86400000);
   if (!(i >= 0 && i < base.nbJours)) return { horsPeriode: true };
   const circule = (svc) => (parseInt(base.services[svc][i >> 2], 16) >> (3 - (i & 3))) & 1;
-  const arrivees = new Set(), departs = new Set();
+  const arrivees = new Set(), departs = new Set(), grandesLignes = new Set();
   let v = 0;
   for (const delta of base.evenements[gare.idx]) {
     v += delta;                                           // événements triés, stockés en différences
-    if (!circule(Math.floor(v / 8192))) continue;
-    const m = (v % 8192) >> 2;
-    ((v & 3) === 1 ? arrivees : departs).add(m);
+    if (!circule(Math.floor(v / 16384))) continue;
+    const m = (v % 16384) >> 3, arrivee = (v & 3) === 1;
+    (arrivee ? arrivees : departs).add(m);
+    if ((v >> 2) & 1) grandesLignes.add(`${arrivee ? 'a' : 'd'}${m}`);
   }
-  return { arrivees: [...arrivees].sort((a, b) => a - b), departs: [...departs].sort((a, b) => a - b) };
+  return {
+    arrivees: [...arrivees].sort((x, y) => x - y),
+    departs: [...departs].sort((x, y) => x - y),
+    grandesLignes,                                        // « a720 » : une grande ligne arrive à 12:00
+  };
+}
+
+/**
+ * Poids d'un train pour toucher du monde : un voyageur qui descend traverse le
+ * parvis (poids 1), celui qui part y arrive avant son train (0,5) ; un TGV ou un
+ * Intercités charrie bien plus de monde qu'un TER (x2,5).
+ */
+const POIDS_DEPART = 0.5;
+const POIDS_GRANDE_LIGNE = 2.5;
+function poidsTrain(horaires, genre, m) {
+  return (genre === 'a' ? 1 : POIDS_DEPART) * (horaires.grandesLignes?.has(`${genre}${m}`) ? POIDS_GRANDE_LIGNE : 1);
 }
 
 /**
@@ -95,15 +111,15 @@ function creneauxLibres(debut, fin, imposes,
 /**
  * Meilleur créneau de présence en gare dans une fenêtre horaire.
  *
- * On cherche (pas de 5 min) le créneau de `presence` minutes qui voit passer le
- * plus d'arrivées + départs, sans empiéter sur les créneaux déjà pris (école,
- * autre gare) ni sur le trajet qui les précède / suit. Le véhicule est ensuite
- * avancé pour arriver `avance` minutes avant le premier train du créneau.
+ * On cherche (pas de 5 min) le créneau de `presence` minutes où passent le plus
+ * de voyageurs (arrivées et départs pondérés par `poidsTrain`), sans empiéter
+ * sur les créneaux déjà pris (école, autre gare) ni sur leur trajet. Le véhicule
+ * est ensuite avancé pour arriver `avance` minutes avant le premier train.
  *
- * @param {{arrivees: number[], departs: number[]}} horaires  minutes depuis minuit
+ * @param {{arrivees: number[], departs: number[], grandesLignes?: Set<string>}} horaires
  * @param {{debut: number, fin: number}} fenetre
  * @param {Array<{debut: number, fin: number}>} occupes
- * @returns {null | {debut, fin, arrivees: number[], departs: number[]}}
+ * @returns {null | {debut, fin, score, arrivees: number[], departs: number[], grandesLignes: number}}
  */
 function meilleurCreneauGare(horaires, fenetre, occupes = [],
   { presence = GARE_PRESENCE_MIN, avance = GARE_AVANCE_MIN, trajet = GARE_TRAJET_MIN, libresRequis = 0 } = {}) {
@@ -113,27 +129,31 @@ function meilleurCreneauGare(horaires, fenetre, occupes = [],
     && creneauxLibres(fenetre.debut, fenetre.fin, [...occupes, { debut: d, fin: f }],
       { presence, trajet }).length >= libresRequis;
   const dans = (liste, d, f) => liste.filter(m => m >= d + 5 && m <= f);
+  const score = (d, f) =>
+    dans(horaires.arrivees, d, f).reduce((t, m) => t + poidsTrain(horaires, 'a', m), 0)
+    + dans(horaires.departs, d, f).reduce((t, m) => t + poidsTrain(horaires, 'd', m), 0);
 
   let meilleur = null;
   for (let d = fenetre.debut; d + 30 <= fenetre.fin; d += 5) {
     const f = Math.min(d + presence, fenetre.fin);
     if (!libre(d, f)) continue;
-    const n = dans(horaires.arrivees, d, f).length + dans(horaires.departs, d, f).length;
-    if (n > (meilleur?.n ?? 0)) meilleur = { d, f, n };
+    const sc = score(d, f);
+    if (sc > (meilleur?.sc ?? 0)) meilleur = { d, f, sc };
   }
   if (!meilleur) return null;
 
   // Arriver un peu avant le premier train, sans reculer la fin du créneau.
-  const premier = Math.min(...[...dans(horaires.arrivees, meilleur.d, meilleur.f),
-    ...dans(horaires.departs, meilleur.d, meilleur.f)]);
+  const premier = Math.min(...dans(horaires.arrivees, meilleur.d, meilleur.f),
+    ...dans(horaires.departs, meilleur.d, meilleur.f));
   let debut = Math.max(meilleur.d, premier - avance);
   let fin = Math.min(debut + presence, fenetre.fin);
-  if (!libre(debut, fin)) { debut = meilleur.d; fin = meilleur.f; }
+  if (!libre(debut, fin) || score(debut, fin) < meilleur.sc) { debut = meilleur.d; fin = meilleur.f; }
 
+  const arrivees = dans(horaires.arrivees, debut, fin), departs = dans(horaires.departs, debut, fin);
   return {
-    debut, fin,
-    arrivees: dans(horaires.arrivees, debut, fin),
-    departs: dans(horaires.departs, debut, fin),
+    debut, fin, score: score(debut, fin), arrivees, departs,
+    grandesLignes: arrivees.filter(m => horaires.grandesLignes?.has(`a${m}`)).length
+      + departs.filter(m => horaires.grandesLignes?.has(`d${m}`)).length,
   };
 }
 
@@ -180,24 +200,28 @@ async function calerGares(dailyPlans, perDayTimes, datesISO) {
         .map(s => s._gare ? s._gare : (s.type === 'school' ? { debut: toMin(s.time), fin: toMin(s.time) + 30 } : null))
         .filter(Boolean);
 
+      // On compare le meilleur créneau du matin et celui de l'après-midi : le
+      // véhicule va là où passe le plus de monde, même dans l'autre demi-journée
+      // (échange de place avec un arrêt ordinaire) si le gain dépasse 10 %.
       const matinActuel = toMin(stop.time) < COUPURE;
-      let creneau = null;
+      const candidats = [];
       for (const essai of [matinActuel, !matinActuel]) {
         const fen = fenetreDe(essai);
         if (!fen) continue;
         const libresRequis = day.stops.filter(s => s !== stop && !s._gare && s.type !== 'school'
           && (toMin(s.time) < COUPURE) === essai).length - (essai !== matinActuel ? 1 : 0);
-        creneau = meilleurCreneauGare(horaires, fen, occupes(essai), { libresRequis });
-        if (!creneau) continue;
-        if (essai !== matinActuel) {
-          // Échange de place avec un arrêt ordinaire de l'autre demi-journée.
-          const autre = day.stops.find(s => s !== stop && !estGare(s) && s.type !== 'school'
-            && s.type !== 'equestrian' && (toMin(s.time) < COUPURE) === essai);
-          if (!autre) { creneau = null; continue; }
-          [stop.time, autre.time] = [autre.time, stop.time];
-        }
-        break;
+        const c = meilleurCreneauGare(horaires, fen, occupes(essai), { libresRequis });
+        if (!c) continue;
+        const autre = essai === matinActuel ? null : day.stops.find(s => s !== stop && !estGare(s)
+          && s.type !== 'school' && s.type !== 'equestrian' && (toMin(s.time) < COUPURE) === essai);
+        if (essai !== matinActuel && !autre) continue;
+        candidats.push({ essai, creneau: c, autre });
       }
+      let choix = candidats.find(c => c.essai === matinActuel);
+      const ailleurs = candidats.find(c => c.essai !== matinActuel);
+      if (ailleurs && (!choix || ailleurs.creneau.score > choix.creneau.score * 1.1)) choix = ailleurs;
+      if (choix?.autre) [stop.time, choix.autre.time] = [choix.autre.time, stop.time];
+      const creneau = choix?.creneau || null;
 
       if (!creneau) {
         stop.trains = { gare: gare.nom, aucun: true };
@@ -209,6 +233,7 @@ async function calerGares(dailyPlans, perDayTimes, datesISO) {
         gare: gare.nom,
         arrivees: creneau.arrivees.map(_hhmm),
         departs: creneau.departs.map(_hhmm),
+        grandesLignes: creneau.grandesLignes,
         arriveeVehicule: _hhmm(creneau.debut),
       };
       bilan.calees++;

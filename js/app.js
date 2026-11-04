@@ -414,7 +414,8 @@ function trainsLineHTML(tr) {
     return `<div class="text-xs text-amber-700 mt-1">&#x1F686; ${sanitize(tr.gare)} : aucun train sur ce créneau (horaires prévus SNCF) — fréquentation faible</div>`;
   }
   const liste = (l) => l.length ? l.map(sanitize).join(' · ') : '—';
-  return `<div class="text-xs text-indigo-700 mt-1">&#x1F686; ${sanitize(tr.gare)} · sur place dès ${sanitize(tr.arriveeVehicule)} · arrivées ${liste(tr.arrivees)} · départs ${liste(tr.departs)}</div>`;
+  const gl = tr.grandesLignes ? ` (dont ${tr.grandesLignes} grande${tr.grandesLignes > 1 ? 's' : ''} ligne${tr.grandesLignes > 1 ? 's' : ''})` : '';
+  return `<div class="text-xs text-indigo-700 mt-1">&#x1F686; ${sanitize(tr.gare)} · sur place dès ${sanitize(tr.arriveeVehicule)} · arrivées ${liste(tr.arrivees)} · départs ${liste(tr.departs)}${gl}</div>`;
 }
 
 /** Ligne « stationnement camion » d'un arrêt (rue carrossable la plus proche). */
