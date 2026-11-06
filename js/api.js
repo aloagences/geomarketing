@@ -1129,7 +1129,7 @@ async function fetchPOIsAutourDe(centres, origine) {
 
   const course = Promise.any(OVERPASS_ENDPOINTS.map(async (endpoint) => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 18000);
+    const timer = setTimeout(() => ctrl.abort(), 35000); // Overpass chargé répond parfois au bout de 30 s
     try {
       const res = await fetch(endpoint, {
         method: 'POST',

@@ -1454,6 +1454,23 @@ async function handleGenerate() {
       }));
       const pois = await fetchPOIsAutourDe(centres, originObj);
 
+      // Secteurs hors de France (Kehl, Genève…) : si OpenStreetMap (Overpass) n'a rien rendu,
+      // le repli IGN + SIRENE ne couvre que la France. On interroge alors Nominatim, qui
+      // couvre toute l'Europe, autour de chaque secteur étranger encore vide.
+      for (let i = 0; i < inseeSecteurs.length; i++) {
+        const sec = inseeSecteurs[i];
+        const etranger = (sec.membres || []).filter(m => m.etranger).length > (sec.membres || []).length / 2;
+        if (!etranger) continue;
+        const r = centres[i].rayonKm;
+        const deja = pois.filter(p => calculateDistance(sec.lat, sec.lng, p.lat, p.lng) <= r).length;
+        if (deja >= 5) continue;
+        setProgress(`Recherche des lieux à ${sec.commune}…`, 52);
+        const secours = await fetchPOIsNominatim(sec.lat, sec.lng, r).catch(() => []);
+        secours.forEach(p => { p.distance = calculateDistance(originObj.lat, originObj.lng, p.lat, p.lng).toFixed(1); });
+        pois.push(...secours.filter(p => !pois.some(e => e.name === p.name && e.address === p.address)));
+        console.log(`[INSEE] Secteur étranger « ${sec.commune} » : ${deja} lieu(x) OpenStreetMap, +${secours.length} via Nominatim.`);
+      }
+
       const nouveaux = pois.filter(p =>
         !filteredPOIs.some(e => e.name === p.name && e.address === p.address) &&
         !isBlocked(p.name, p.address, p.lat, p.lng)
@@ -2188,7 +2205,45 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
         }
       }
 
-      console.log(`[INSEE] Tracé recadré : ${replaces} arrêt(s) ramené(s) dans la sélection, ${restesHorsZone} laissé(s) hors zone (pool épuisé), ${poolZone.length} lieu(x) disponibles dans les carreaux.`);
+      // Rééquilibrage DANS la sélection : la passe ci-dessus ne déplace que les arrêts hors
+      // zone. Si l'IA a tout mis dans une commune (côté français), une autre commune choisie
+      // (Kehl) restait sans arrêt. On déplace un arrêt de la commune la plus servie vers la
+      // plus en retard sur sa part de ménages, tant qu'un lieu disponible l'y attend.
+      const fixe = (s) => s.type === 'equestrian' || s.type === 'competitor' || s.type === 'market'
+        || estLieuEcole(s.locationName, s.type);
+      let reequilibres = 0;
+      for (let garde = 0; garde < arretsTotal; garde++) {
+        const enRetard = communesZone.filter(c => deficit(c.commune) >= 1)
+          .sort((a, b) => deficit(b.commune) - deficit(a.commune));
+        let fait = false;
+        for (const cible of enRetard) {
+          // Arrêt à déplacer : dans la commune la plus en excédent.
+          let source = null;
+          for (const day of data.dailyPlans) {
+            for (const s of (day.stops || [])) {
+              if (fixe(s) || !s.lat || !s.lng) continue;
+              const n = communeDe(s.lat, s.lng);
+              if (!n || n === cible.commune || deficit(n) > -1) continue;
+              if (!source || deficit(n) < deficit(source.n)) source = { day, s, n };
+            }
+          }
+          if (!source) break;
+          const prisCeJour = new Set(source.day.stops.map(x => x.locationName));
+          const remplacant = poolZone.find(p => communeDe(p.lat, p.lng) === cible.commune
+            && !prisCeJour.has(p.name) && canUse(p.name));
+          if (!remplacant) continue;
+          compte.set(source.n, Math.max(0, (compte.get(source.n) || 0) - 1));
+          compte.set(cible.commune, (compte.get(cible.commune) || 0) + 1);
+          Object.assign(source.s, lieuDe(remplacant, 'ZONE INSEE'));
+          markUsed(remplacant.name);
+          reequilibres++;
+          fait = true;
+          break;
+        }
+        if (!fait) break;
+      }
+
+      console.log(`[INSEE] Tracé recadré : ${replaces} arrêt(s) ramené(s) dans la sélection, ${reequilibres} rééquilibré(s) entre communes, ${restesHorsZone} laissé(s) hors zone (pool épuisé), ${poolZone.length} lieu(x) disponibles dans les carreaux.`);
       if (restesHorsZone > 0) {
         inseeHorsZone = { restes: restesHorsZone, disponibles: poolZone.length };
       }
