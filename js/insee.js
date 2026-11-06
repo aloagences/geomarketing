@@ -103,6 +103,24 @@ async function fetchCarreauxINSEE(lat, lng, radiusKm) {
       ring,
     });
   }
+  // Pays voisins : au-delà de la frontière, la grille européenne du recensement 2021
+  // prend le relais (carreaux-europe.js). Une panne de ce côté ne bloque jamais la France.
+  if (typeof fetchCarreauxEurope === 'function') {
+    try {
+      const clesFrance = new Set(carreaux.map(c => c.cle));
+      const etrangers = await fetchCarreauxEurope(lat, lng, radiusKm, clesFrance);
+      if (etrangers.length) {
+        // Noms de localité déjà dans les tuiles (GeoNames) ; un carré isolé, à plus de 8 km de toute
+        // localité, prend le nom du pays (pas d'appel à OpenStreetMap, souvent saturé).
+        etrangers.forEach(c => { if (!c.commune) c.commune = c.paysNom; });
+        carreaux.push(...etrangers);
+        console.log(`[Europe] ${etrangers.length} carreaux de 200 m hors de France (${[...new Set(etrangers.map(c => c.paysNom))].join(', ')}).`);
+      }
+    } catch (e) {
+      console.warn('[Europe] carreaux des pays voisins indisponibles', e);
+    }
+  }
+
   carreaux.sort((a, b) => b.ind - a.ind);
   return carreaux;
 }
@@ -367,7 +385,9 @@ function _rendreLegendeINSEE() {
   _inseeEl('inseeLegende').innerHTML =
     `<span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-1">Habitants</span>`
     + cases
-    + `<span class="text-[10px] text-gray-400 ml-2 pl-2 border-l border-gray-200">chiffres = ménages</span>`;
+    + `<span class="text-[10px] text-gray-400 ml-2 pl-2 border-l border-gray-200">chiffres = ménages</span>`
+    + (_inseeCarreaux.some(c => c.etranger)
+      ? `<span class="text-[10px] text-gray-400 ml-2 pl-2 border-l border-gray-200">hors France : carrés de 1 km (2021)</span>` : '');
 }
 
 /**
@@ -403,7 +423,7 @@ async function openInseeMap(origin, radiusKm) {
   if (!_inseeCarreaux.length) {
     _inseeEl('inseeErreur').classList.remove('hidden');
     _inseeEl('inseeErreurTexte').textContent =
-      "Aucune donnée INSEE sur ce secteur. Les carreaux Filosofi ne couvrent que la France métropolitaine et la Réunion.";
+      "Aucune donnée de population sur ce secteur. Couverture : France (INSEE), Allemagne, Suisse, Italie, Espagne, Belgique et Luxembourg (recensement européen 2021).";
     return new Promise(r => { _inseeResolve = r; });
   }
 
@@ -414,7 +434,7 @@ async function openInseeMap(origin, radiusKm) {
   if (!_inseeMap) {
     _inseeMap = L.map('inseeMap', { preferCanvas: true, zoomControl: true });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap · Carreaux INSEE Filosofi / IGN',
+      attribution: '&copy; OpenStreetMap · Carreaux INSEE Filosofi / IGN · Pays voisins : Eurostat, recensement 2021',
       maxZoom: 19, subdomains: 'abc',
     }).addTo(_inseeMap);
   } else {
@@ -427,7 +447,8 @@ async function openInseeMap(origin, radiusKm) {
   for (const c of _inseeCarreaux) {
     const poly = L.polygon(c.ring, { ..._styleCarreau(c), interactive: true }).addTo(_inseeMap);
     poly.bindTooltip(
-      `<b>${c.ind} habitant${c.ind > 1 ? 's' : ''}</b><br>${c.men} ménage${c.men > 1 ? 's' : ''}<br><span style="color:#64748b">${sanitize(c.commune)}</span>`,
+      `<b>${c.ind} habitant${c.ind > 1 ? 's' : ''}</b><br>${c.men} ménage${c.men > 1 ? 's' : ''}${c.etranger ? ' (estimé)' : ''}<br><span style="color:#64748b">${sanitize(c.commune)}</span>`
+      + (c.etranger ? `<br><span style="color:#64748b;font-size:11px">${sanitize(c.paysNom)} · recensement 2021, carré de 1 km réparti</span>` : ''),
       { sticky: true }
     );
     // Le pinceau est géré au niveau de la carte, pas du polygone : pendant un
@@ -673,7 +694,7 @@ function drawPotentialMap(origin, radiusKm) {
   if (!_potentialMap) {
     _potentialMap = L.map('potentialMap', { preferCanvas: true, zoomControl: false, attributionControl: true });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap · Carreaux INSEE Filosofi / IGN',
+      attribution: '&copy; OpenStreetMap · Carreaux INSEE Filosofi / IGN · Pays voisins : Eurostat, recensement 2021',
       maxZoom: 19, subdomains: 'abc',
     }).addTo(_potentialMap);
   } else {
