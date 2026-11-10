@@ -479,6 +479,7 @@ async function openInseeMap(origin, radiusKm) {
   markerQG.bindTooltip('Point de départ (QG)', { permanent: false, direction: 'right' });
 
   _majStatsINSEE();
+  _afficherConcurrentsINSEE(origin, radiusKm);   // sans attendre : la carte reste utilisable
   return new Promise(r => { _inseeResolve = r; });
 }
 
@@ -791,4 +792,66 @@ function drawPotentialMap(origin, radiusKm) {
         </p>
       </div>`);
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Concurrents sur la carte du potentiel
+// ---------------------------------------------------------------------------
+
+const _cacheConcurrents = new Map();   // « enseigne|lat|lng|rayon » → magasins
+let _inseeCalqueConcurrents = null;
+let _inseeJetonConcurrents = 0;
+
+/**
+ * Magasins des concurrents saisis dans le formulaire, en points orange, dès l'ouverture de la
+ * carte : on choisit ses carreaux en voyant où sont les concurrents. Chargement en tâche de fond.
+ */
+async function _afficherConcurrentsINSEE(origin, radiusKm) {
+  const boite = _inseeEl('inseeConcurrents');
+  if (!_inseeMap || !boite) return;
+  if (!_inseeCalqueConcurrents) _inseeCalqueConcurrents = L.layerGroup().addTo(_inseeMap);
+  else if (!_inseeMap.hasLayer(_inseeCalqueConcurrents)) _inseeCalqueConcurrents.addTo(_inseeMap);
+  _inseeCalqueConcurrents.clearLayers();
+  const jeton = ++_inseeJetonConcurrents;
+
+  const titre = '<p class="text-[10px] font-extrabold uppercase tracking-wider text-orange-700 mb-1 flex items-center gap-1.5">'
+    + '<span style="background:#ea580c;width:10px;height:10px;transform:rotate(45deg);border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,.4)" class="inline-block"></span> Concurrents</p>';
+  const enseignes = (document.getElementById('competitors')?.value || '')
+    .split(',').map(s => s.trim()).filter(s => s.length >= 2).slice(0, 6);
+  boite.classList.remove('hidden');
+  if (!enseignes.length) {
+    boite.innerHTML = titre + '<p class="text-[11px] text-gray-500">Renseignez le champ « Concurrents » du formulaire (ex. Lidl, Carrefour) pour les voir ici.</p>';
+    return;
+  }
+  boite.innerHTML = titre + `<p class="text-[11px] text-gray-500">Recherche : ${enseignes.map(sanitize).join(', ')}…</p>`;
+
+  const icone = L.divIcon({
+    className: 'custom-div-icon',
+    html: '<div style="background:#ea580c;width:13px;height:13px;transform:rotate(45deg);border:2px solid white;box-shadow:0 0 5px rgba(0,0,0,.45)"></div>',
+    iconSize: [13, 13], iconAnchor: [6, 6],
+  });
+  const rayon = radiusKm * 1.2;
+  const lignes = {};
+  // Départs décalés d'une seconde : Nominatim refuse les rafales.
+  await Promise.all(enseignes.map(async (enseigne, i) => {
+    const cle = `${enseigne.toLowerCase()}|${origin.lat.toFixed(3)}|${origin.lng.toFixed(3)}|${rayon}`;
+    let magasins = _cacheConcurrents.get(cle);
+    if (!magasins) {
+      await new Promise(r => setTimeout(r, i * 1100));
+      magasins = await fetchMagasinsEnseigne(enseigne, origin.lat, origin.lng, rayon).catch(() => []);
+      if (magasins.length) _cacheConcurrents.set(cle, magasins);
+    }
+    if (jeton !== _inseeJetonConcurrents) return;           // carte rouverte entre-temps
+    magasins = magasins.filter(m => calculateDistance(origin.lat, origin.lng, m.lat, m.lng) <= rayon);
+    lignes[enseigne] = magasins.length;
+    for (const m of magasins) {
+      L.marker([m.lat, m.lng], { icon: icone, interactive: true, keyboard: false })
+        .addTo(_inseeCalqueConcurrents)
+        .bindTooltip(`<b>${sanitize(m.nom)}</b> — concurrent<br>${sanitize(m.adresse || '')}<br>`
+          + `<span style="color:#64748b">${calculateDistance(origin.lat, origin.lng, m.lat, m.lng).toFixed(1).replace('.', ',')} km du point de départ</span>`);
+    }
+    boite.innerHTML = titre + enseignes.map(e => `<p class="text-[11px] text-gray-700 leading-5">${sanitize(e)} : `
+      + (e in lignes ? `<b>${lignes[e]}</b> magasin${lignes[e] > 1 ? 's' : ''}` : '<span class="text-gray-400">recherche…</span>') + '</p>').join('');
+  }));
 }
