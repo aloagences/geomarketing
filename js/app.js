@@ -1293,6 +1293,7 @@ async function handleGenerate() {
     // Chaque magasin garde sa zone : un lieu plus proche d'un autre magasin de l'enseigne
     // que du magasin client appartient à cet autre magasin, on n'y planifie rien.
     let autresMagasins = [];
+    window._autresMagasins = [];   // lu par les deux cartes (points rouges + légende)
     if (document.getElementById('zoneEnseigne')?.checked !== false) {
       const enseigne = (ownBrandList[0] || inputRefs.brand.value || '').trim();
       if (enseigne) {
@@ -1307,6 +1308,7 @@ async function handleGenerate() {
         autresMagasins = magasins.filter(m => !(client && m === client && dist(m) <= 1.5));
         console.log(`[Enseigne] ${autresMagasins.length} autre(s) magasin(s) ${enseigne} dans ${Math.min(radius * 2, 40)} km : `
           + autresMagasins.map(m => `${m.nom} (${m.adresse || '?'}, ${calculateDistance(originObj.lat, originObj.lng, m.lat, m.lng).toFixed(1)} km)`).join(' · '));
+        window._autresMagasins = autresMagasins.map(m => ({ ...m, enseigne }));
         if (autresMagasins.length) {
           showMessage(`Zone respectée : ${autresMagasins.length} autre(s) magasin(s) ${enseigne} à proximité, aucun arrêt dans leur zone.`, 'info');
         }

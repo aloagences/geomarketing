@@ -730,6 +730,13 @@ function drawPotentialMap(origin, radiusKm) {
     }),
   }).addTo(_potentialMap);
 
+  // Magasins de la même enseigne : point rouge + légende « ne pas circuler sur la zone »
+  if (typeof magasinsEnseigneAffiches === 'function') {
+    const magasins = magasinsEnseigneAffiches(origin, radiusKm);
+    poserMagasinsEnseigne(_potentialMap, magasins);
+    rendreLegendeEnseigne('potLegendeEnseigne', magasins);
+  }
+
   // Cadrage sur le rayon de campagne, pas sur les carreaux : ajusté aux seuls
   // carreaux, le cercle débordait des deux côtés et le client ne voyait plus
   // l'étendue réelle de sa zone. Emprise calculée à la main : `getBounds()`

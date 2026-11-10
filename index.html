@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.35 — 10 novembre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.36 — 10 novembre 2026</span>
       </div>
     </header>
 
@@ -567,6 +567,7 @@
                paysage sans être réduite au point de devenir illisible. -->
           <div id="potentialMap" class="w-full h-[440px] z-0 bg-gray-100"></div>
           <div class="px-8 pt-3 pb-1.5 flex items-center flex-wrap gap-2.5" id="potLegende"></div>
+          <div class="px-8 pb-2 hidden" id="potLegendeEnseigne"></div>
           <div class="px-8 pb-4 grid grid-cols-2 md:grid-cols-4 gap-2" id="potSecteurs"></div>
         </div>
 
@@ -581,6 +582,7 @@
             <span id="mapStats" class="text-sm font-bold bg-white/10 px-3 py-1 rounded-lg"></span>
           </div>
           <div id="leafletMap" class="w-full h-[600px] z-0 bg-gray-100"></div>
+          <div class="px-8 py-3 hidden" id="mapLegendeEnseigne"></div>
         </div>
 
         <!-- Lieux importants de la zone (repérage chauffeur) -->
@@ -716,16 +718,16 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.35"></script>
-  <script src="js/api.js?v=5.35"></script>
-  <script src="js/carreaux-europe.js?v=5.35"></script>
-  <script src="js/insee.js?v=5.35"></script>
-  <script src="js/map.js?v=5.35"></script>
-  <script src="js/export.js?v=5.35"></script>
-  <script src="js/route.js?v=5.35"></script>
-  <script src="js/camion.js?v=5.35"></script>
-  <script src="js/trains.js?v=5.35"></script>
-  <script src="js/parking.js?v=5.35"></script>
-  <script src="js/app.js?v=5.35"></script>
+  <script src="js/utils.js?v=5.36"></script>
+  <script src="js/api.js?v=5.36"></script>
+  <script src="js/carreaux-europe.js?v=5.36"></script>
+  <script src="js/insee.js?v=5.36"></script>
+  <script src="js/map.js?v=5.36"></script>
+  <script src="js/export.js?v=5.36"></script>
+  <script src="js/route.js?v=5.36"></script>
+  <script src="js/camion.js?v=5.36"></script>
+  <script src="js/trains.js?v=5.36"></script>
+  <script src="js/parking.js?v=5.36"></script>
+  <script src="js/app.js?v=5.36"></script>
 </body>
 </html>
