@@ -1796,7 +1796,7 @@ ANTI-DOUBLON STRICT: un même lieu (ou deux lieux à moins de 100 m) ne figure J
 COUVERTURE: le véhicule doit circuler sur TOUT le périmètre : chaque jour vise un secteur différent, avec des arrêts enchaînés dans l'ordre le plus court (pas d'allers-retours d'un bout à l'autre de la zone).
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
 ${smActive ? `STREET MARKETING COUPLÉ: Les jours marqués [STREET MARKETING] le VÉHICULE doit concentrer TOUS ses arrêts dans un rayon de 3 km autour du centre de ${smCityRaw}. Ces jours-là, génère AUSSI un tableau "smStops" (4 à 6 arrêts piétons) avec des rues commerçantes, places, hubs de transport ou marchés de ${smCityRaw}. Les smStops ont le même format que stops mais type parmi : pedestrian|square|transport|market.` : ''}
-JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}],"smStops":[]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
+JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}],"smStops":[]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
 
     const prompt = `Plan pour ${officialBrand} depuis ${inputRefs.address.value}.\nHORAIRES PAR JOUR :\n${perDayTimesPrompt}\n${poiContext}`;
 
@@ -1851,8 +1851,13 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"lundi JJ/MM/YYYY","role":"V
       }
     });
 
+    // Le libellé du jour est TOUJOURS recalculé depuis la date : l'IA recopie l'exemple du
+    // prompt (« lundi JJ/MM/YYYY ») et écrivait « Lundi 13/11/2026 » pour un vendredi. Ce
+    // libellé sert aussi aux marchés et au jour équestre : faux, il les plaçait le mauvais jour.
     data.dailyPlans = datesISO.map((iso, i) => {
-      return plansByISO[iso] || { day: datesList[i], role: 'VÉHICULE', stops: [] };
+      const dp = plansByISO[iso] || { role: 'VÉHICULE', stops: [] };
+      dp.day = datesList[i];
+      return dp;
     });
 
     // --- Garde-fou : forcer la répartition matin/aprem ---
