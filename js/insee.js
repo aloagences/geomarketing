@@ -731,7 +731,7 @@ function drawPotentialMap(origin, radiusKm) {
     }),
   }).addTo(_potentialMap);
 
-  // Magasins de la même enseigne : point rouge + légende « ne pas circuler sur la zone »
+  // Magasins de la même enseigne : losange violet + légende « ne pas circuler sur la zone »
   if (typeof magasinsEnseigneAffiches === 'function') {
     const magasins = magasinsEnseigneAffiches(origin, radiusKm);
     poserMagasinsEnseigne(_potentialMap, magasins);

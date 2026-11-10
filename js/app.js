@@ -1293,7 +1293,7 @@ async function handleGenerate() {
     // Chaque magasin garde sa zone : un lieu plus proche d'un autre magasin de l'enseigne
     // que du magasin client appartient à cet autre magasin, on n'y planifie rien.
     let autresMagasins = [];
-    window._autresMagasins = [];   // lu par les deux cartes (points rouges + légende)
+    window._autresMagasins = [];   // lu par les deux cartes (losanges violets + légende)
     if (document.getElementById('zoneEnseigne')?.checked !== false) {
       const enseigne = (ownBrandList[0] || inputRefs.brand.value || '').trim();
       if (enseigne) {
