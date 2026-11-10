@@ -804,8 +804,11 @@ let _inseeCalqueConcurrents = null;
 let _inseeJetonConcurrents = 0;
 
 /**
- * Magasins des concurrents saisis dans le formulaire, en points orange, dès l'ouverture de la
- * carte : on choisit ses carreaux en voyant où sont les concurrents. Chargement en tâche de fond.
+ * Sur la carte du potentiel, dès l'ouverture et en tâche de fond :
+ *  - les magasins des concurrents saisis dans le formulaire, en losanges ORANGE ;
+ *  - les autres magasins de la MÊME ENSEIGNE (« Notre enseigne », sinon l'enseigne client),
+ *    en losanges VIOLETS : leur zone est à éviter. Le magasin client lui-même (le plus proche
+ *    du départ, à moins de 1,5 km) n'est pas affiché.
  */
 async function _afficherConcurrentsINSEE(origin, radiusKm) {
   const boite = _inseeEl('inseeConcurrents');
@@ -815,26 +818,41 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
   _inseeCalqueConcurrents.clearLayers();
   const jeton = ++_inseeJetonConcurrents;
 
-  const titre = '<p class="text-[10px] font-extrabold uppercase tracking-wider text-orange-700 mb-1 flex items-center gap-1.5">'
-    + '<span style="background:#ea580c;width:10px;height:10px;transform:rotate(45deg);border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,.4)" class="inline-block"></span> Concurrents</p>';
-  const enseignes = (document.getElementById('competitors')?.value || '')
-    .split(',').map(s => s.trim()).filter(s => s.length >= 2).slice(0, 6);
-  boite.classList.remove('hidden');
-  if (!enseignes.length) {
-    boite.innerHTML = titre + '<p class="text-[11px] text-gray-500">Renseignez le champ « Concurrents » du formulaire (ex. Lidl, Carrefour) pour les voir ici.</p>';
-    return;
-  }
-  boite.innerHTML = titre + `<p class="text-[11px] text-gray-500">Recherche : ${enseignes.map(sanitize).join(', ')}…</p>`;
+  const losange = (couleur, taille) => `<span style="background:${couleur};width:${taille}px;height:${taille}px;transform:rotate(45deg);`
+    + 'border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,.45)" class="inline-block flex-shrink-0"></span>';
+  const COUL = { meme: '#7c3aed', concurrent: '#ea580c' };
 
-  const icone = L.divIcon({
+  const meme = ((document.getElementById('ownBrand')?.value || '').split(',')[0].trim()
+    || (document.getElementById('clientBrand')?.value || '').trim());
+  const concurrents = (document.getElementById('competitors')?.value || '')
+    .split(',').map(x => x.trim()).filter(x => x.length >= 2 && x.toLowerCase() !== meme.toLowerCase()).slice(0, 6);
+  const recherches = [...(meme.length >= 2 ? [{ enseigne: meme, role: 'meme' }] : []),
+                      ...concurrents.map(e => ({ enseigne: e, role: 'concurrent' }))];
+
+  const lignes = {};
+  const rendre = () => {
+    const bloc = (role, titre, liste, vide) => `<p class="text-[10px] font-extrabold uppercase tracking-wider mb-0.5 mt-1 flex items-center gap-1.5" style="color:${COUL[role]}">`
+      + `${losange(COUL[role], 10)} ${titre}</p>` + (liste.length ? liste.map(r => `<p class="text-[11px] text-gray-700 leading-5">${sanitize(r.enseigne)} : `
+        + (r.enseigne + r.role in lignes ? `<b>${lignes[r.enseigne + r.role]}</b> magasin${lignes[r.enseigne + r.role] > 1 ? 's' : ''}` : '<span class="text-gray-400">recherche…</span>') + '</p>').join('')
+        : `<p class="text-[11px] text-gray-500 leading-4">${vide}</p>`);
+    boite.innerHTML = bloc('meme', 'Même enseigne · zone à éviter', recherches.filter(r => r.role === 'meme'),
+        'Renseignez l\'enseigne du client pour voir ses autres magasins.')
+      + bloc('concurrent', 'Concurrents', recherches.filter(r => r.role === 'concurrent'),
+        'Renseignez le champ « Concurrents » (ex. Lidl, Carrefour) pour les voir ici.');
+  };
+  boite.classList.remove('hidden');
+  rendre();
+  if (!recherches.length) return;
+
+  const icone = (role) => L.divIcon({
     className: 'custom-div-icon',
-    html: '<div style="background:#ea580c;width:13px;height:13px;transform:rotate(45deg);border:2px solid white;box-shadow:0 0 5px rgba(0,0,0,.45)"></div>',
+    html: `<div style="background:${COUL[role]};width:13px;height:13px;transform:rotate(45deg);border:2px solid white;box-shadow:0 0 5px rgba(0,0,0,.45)"></div>`,
     iconSize: [13, 13], iconAnchor: [6, 6],
   });
   const rayon = radiusKm * 1.2;
-  const lignes = {};
+  const dist = (m) => calculateDistance(origin.lat, origin.lng, m.lat, m.lng);
   // Départs décalés d'une seconde : Nominatim refuse les rafales.
-  await Promise.all(enseignes.map(async (enseigne, i) => {
+  await Promise.all(recherches.map(async ({ enseigne, role }, i) => {
     const cle = `${enseigne.toLowerCase()}|${origin.lat.toFixed(3)}|${origin.lng.toFixed(3)}|${rayon}`;
     let magasins = _cacheConcurrents.get(cle);
     if (!magasins) {
@@ -843,15 +861,18 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
       if (magasins.length) _cacheConcurrents.set(cle, magasins);
     }
     if (jeton !== _inseeJetonConcurrents) return;           // carte rouverte entre-temps
-    magasins = magasins.filter(m => calculateDistance(origin.lat, origin.lng, m.lat, m.lng) <= rayon);
-    lignes[enseigne] = magasins.length;
-    for (const m of magasins) {
-      L.marker([m.lat, m.lng], { icon: icone, interactive: true, keyboard: false })
-        .addTo(_inseeCalqueConcurrents)
-        .bindTooltip(`<b>${sanitize(m.nom)}</b> — concurrent<br>${sanitize(m.adresse || '')}<br>`
-          + `<span style="color:#64748b">${calculateDistance(origin.lat, origin.lng, m.lat, m.lng).toFixed(1).replace('.', ',')} km du point de départ</span>`);
+    magasins = magasins.filter(m => dist(m) <= rayon);
+    if (role === 'meme' && magasins.length) {
+      const client = magasins.reduce((b, m) => (!b || dist(m) < dist(b) ? m : b), null);
+      if (dist(client) <= 1.5) magasins = magasins.filter(m => m !== client);
     }
-    boite.innerHTML = titre + enseignes.map(e => `<p class="text-[11px] text-gray-700 leading-5">${sanitize(e)} : `
-      + (e in lignes ? `<b>${lignes[e]}</b> magasin${lignes[e] > 1 ? 's' : ''}` : '<span class="text-gray-400">recherche…</span>') + '</p>').join('');
+    lignes[enseigne + role] = magasins.length;
+    for (const m of magasins) {
+      L.marker([m.lat, m.lng], { icon: icone(role), interactive: true, keyboard: false, zIndexOffset: role === 'meme' ? 500 : 0 })
+        .addTo(_inseeCalqueConcurrents)
+        .bindTooltip(`<b>${sanitize(m.nom)}</b> — ${role === 'meme' ? '<span style="color:#7c3aed">même enseigne : ne pas circuler sur sa zone</span>' : 'concurrent'}`
+          + `<br>${sanitize(m.adresse || '')}<br><span style="color:#64748b">${dist(m).toFixed(1).replace('.', ',')} km du point de départ</span>`);
+    }
+    rendre();
   }));
 }
