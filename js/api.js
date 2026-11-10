@@ -1784,3 +1784,66 @@ async function fetchWeatherForecast(lat, lng, startDate, days) {
     return forecast;
   } catch { return {}; }
 }
+
+// ========================================
+// MAGASINS DE LA MÊME ENSEIGNE (zones de chalandise)
+// ========================================
+
+/**
+ * Magasins d'une enseigne autour d'un point, pour que chaque magasin garde sa zone :
+ * un plan ALDI Dagneux ne doit pas aller tracter devant la porte d'ALDI Montluel.
+ * OpenStreetMap (Overpass) et Nominatim sont interrogés EN PARALLÈLE — Overpass est
+ * souvent saturé — et leurs résultats fusionnés (deux points à moins de 150 m = un magasin).
+ * @returns {Promise<{nom:string, adresse:string, lat:number, lng:number}[]>}
+ */
+async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
+  const marque = String(enseigne || '').trim();
+  if (marque.length < 2) return [];
+  const motif = marque.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+  const rM = Math.round(Math.min(rayonKm, 40) * 1000);
+
+  const viaOverpass = (async () => {
+    if (overpassInjoignable()) return [];
+    const q = `[out:json][timeout:25];(`
+      + `nwr["brand"~"${motif}",i](around:${rM},${lat},${lng});`
+      + `nwr["shop"]["name"~"${motif}",i](around:${rM},${lat},${lng});`
+      + `);out center 200;`;
+    const els = await Promise.any(OVERPASS_ENDPOINTS.map(async (url) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 25000);
+      try {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q), signal: ctrl.signal });
+        if (!r.ok) throw new Error(String(r.status));
+        return (await r.json()).elements || [];
+      } finally { clearTimeout(t); }
+    }));
+    return els.map(e => ({
+      nom: e.tags?.name || marque,
+      adresse: [e.tags?.['addr:housenumber'], e.tags?.['addr:street'], e.tags?.['addr:city']].filter(Boolean).join(' '),
+      lat: e.lat ?? e.center?.lat, lng: e.lon ?? e.center?.lon,
+    })).filter(m => m.lat && m.lng);
+  })().catch(() => []);
+
+  const viaNominatim = (async () => {
+    const dLat = Math.min(rayonKm, 40) / 111, dLng = Math.min(rayonKm, 40) / (111 * Math.cos(lat * Math.PI / 180));
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(marque)}`
+      + `&viewbox=${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}&bounded=1&limit=50&addressdetails=1`;
+    const r = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
+    if (!r.ok) return [];
+    const nb = new RegExp(motif, 'i');
+    return (await r.json())
+      .filter(x => nb.test(x.name || x.display_name || ''))
+      .map(x => ({
+        nom: x.name || marque,
+        adresse: [x.address?.house_number, x.address?.road, x.address?.city || x.address?.town || x.address?.village].filter(Boolean).join(' '),
+        lat: parseFloat(x.lat), lng: parseFloat(x.lon),
+      }));
+  })().catch(() => []);
+
+  const tous = [...await viaOverpass, ...await viaNominatim];
+  const uniques = [];
+  for (const m of tous) {
+    if (!uniques.some(u => calculateDistance(u.lat, u.lng, m.lat, m.lng) < 0.15)) uniques.push(m);
+  }
+  return uniques;
+}

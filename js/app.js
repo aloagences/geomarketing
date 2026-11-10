@@ -1289,8 +1289,40 @@ async function handleGenerate() {
       } catch { /* continuer sans coords */ }
     }
 
+    // --- Zones des autres magasins de la même enseigne (par défaut) ---
+    // Chaque magasin garde sa zone : un lieu plus proche d'un autre magasin de l'enseigne
+    // que du magasin client appartient à cet autre magasin, on n'y planifie rien.
+    let autresMagasins = [];
+    if (document.getElementById('zoneEnseigne')?.checked !== false) {
+      const enseigne = (ownBrandList[0] || inputRefs.brand.value || '').trim();
+      if (enseigne) {
+        setProgress(`Magasins ${enseigne} voisins…`, 47);
+        const magasins = await fetchMagasinsEnseigne(enseigne, originObj.lat, originObj.lng, Math.min(radius * 2, 40));
+        // Le magasin client lui-même n'est pas un voisin : c'est le magasin de l'enseigne le plus
+        // proche du point de départ, s'il est à moins de 1,5 km. Un seuil plus serré échouait quand
+        // l'adresse se géocode approximativement (« Chemin de desserte Z.I » → 700 m d'écart) : le
+        // magasin client passait pour un voisin et bloquait la moitié de sa propre zone.
+        const dist = (m) => calculateDistance(originObj.lat, originObj.lng, m.lat, m.lng);
+        const client = magasins.reduce((best, m) => (!best || dist(m) < dist(best) ? m : best), null);
+        autresMagasins = magasins.filter(m => !(client && m === client && dist(m) <= 1.5));
+        console.log(`[Enseigne] ${autresMagasins.length} autre(s) magasin(s) ${enseigne} dans ${Math.min(radius * 2, 40)} km : `
+          + autresMagasins.map(m => `${m.nom} (${m.adresse || '?'}, ${calculateDistance(originObj.lat, originObj.lng, m.lat, m.lng).toFixed(1)} km)`).join(' · '));
+        if (autresMagasins.length) {
+          showMessage(`Zone respectée : ${autresMagasins.length} autre(s) magasin(s) ${enseigne} à proximité, aucun arrêt dans leur zone.`, 'info');
+        }
+      }
+    }
+    /** Autre magasin de l'enseigne plus proche que le magasin client, ou null. */
+    const magasinVoisinPlusProche = (lat, lng) => {
+      if (!autresMagasins.length || !lat || !lng) return null;
+      const dClient = calculateDistance(lat, lng, originObj.lat, originObj.lng);
+      return autresMagasins.find(m => calculateDistance(lat, lng, m.lat, m.lng) < dClient) || null;
+    };
+
     // Helper : un lieu est-il interdit ? (texte OU coordonnées dans rayon 3km)
     const isBlocked = (name = '', address = '', lat = null, lng = null) => {
+      // Zone d'un autre magasin de l'enseigne
+      if (magasinVoisinPlusProche(lat, lng)) return true;
       const nameLow = name.toLowerCase();
       const addrLow = address.toLowerCase();
       // Blocage par texte
@@ -2252,6 +2284,32 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
       if (restesHorsZone > 0) {
         inseeHorsZone = { restes: restesHorsZone, disponibles: poolZone.length };
       }
+    }
+
+    // --- ZONES DES AUTRES MAGASINS DE L'ENSEIGNE : dernier contrôle des arrêts ---
+    // Le pool est déjà filtré, mais l'IA peut proposer un lieu de son cru : tout arrêt
+    // tombé dans la zone d'un autre magasin est remplacé par un lieu de la zone du client.
+    if (autresMagasins.length) {
+      let deplaces = 0, restes = 0;
+      for (const day of data.dailyPlans) {
+        const prisCeJour = new Set((day.stops || []).map(s => s.locationName));
+        for (const s of (day.stops || [])) {
+          if (s.type === 'equestrian' || !s.lat || !s.lng) continue;
+          const voisin = magasinVoisinPlusProche(s.lat, s.lng);
+          if (!voisin) continue;
+          const remplacant = availablePOIs.find(p => p.lat && p.lng && !prisCeJour.has(p.name) && canUse(p.name)
+            && !magasinVoisinPlusProche(p.lat, p.lng) && !estLieuEcole(p.name, p.type)
+            && (!inseeSelection?.carreaux?.length || dansSelectionINSEE(p.lat, p.lng)));
+          if (!remplacant) { restes++; continue; }
+          console.log(`[Enseigne] ${day.day} : « ${s.locationName} » est dans la zone de ${voisin.nom} → « ${remplacant.name} ».`);
+          prisCeJour.delete(s.locationName);
+          Object.assign(s, lieuDe(remplacant, 'ZONE CLIENT'));
+          prisCeJour.add(remplacant.name);
+          markUsed(remplacant.name);
+          deplaces++;
+        }
+      }
+      if (deplaces || restes) console.log(`[Enseigne] ${deplaces} arrêt(s) ramené(s) dans la zone du client, ${restes} sans remplaçant.`);
     }
 
     // --- STREET MARKETING : contrainte véhicule + arrêts piétons ---

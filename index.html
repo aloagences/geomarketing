@@ -37,7 +37,7 @@
         </div>
         <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">Générateur de Plan de Circulation</h1>
         <p class="text-lg text-blue-200 mt-2 font-medium">Création de feuilles de route &amp; exports PDF Premium</p>
-        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.34 — 10 novembre 2026</span>
+        <span class="mt-4 inline-block bg-white/10 text-blue-200 text-xs font-mono font-bold px-3 py-1 rounded-full tracking-wider">v5.35 — 10 novembre 2026</span>
       </div>
     </header>
 
@@ -264,6 +264,10 @@
                     <span class="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide">Évite la cannibalisation</span>
                   </label>
                   <input class="input-style border-purple-200 focus:border-purple-500" id="ownBrand" type="text" placeholder="Ex: Marie Blachère… (notre propre réseau)" />
+                  <label class="mt-2 flex items-start gap-2 text-xs text-purple-900 cursor-pointer">
+                    <input type="checkbox" id="zoneEnseigne" class="mt-0.5 accent-purple-600" checked />
+                    <span><b>Respecter la zone des autres magasins de l'enseigne</b> : aucun arrêt plus près d'un autre magasin (enseigne du client, ou celle saisie ci-dessus) que du magasin client.</span>
+                  </label>
                 </div>
 
                 <div class="col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
@@ -712,16 +716,16 @@
   </div>
 
   <!-- Scripts (ordre important) -->
-  <script src="js/utils.js?v=5.34"></script>
-  <script src="js/api.js?v=5.34"></script>
-  <script src="js/carreaux-europe.js?v=5.34"></script>
-  <script src="js/insee.js?v=5.34"></script>
-  <script src="js/map.js?v=5.34"></script>
-  <script src="js/export.js?v=5.34"></script>
-  <script src="js/route.js?v=5.34"></script>
-  <script src="js/camion.js?v=5.34"></script>
-  <script src="js/trains.js?v=5.34"></script>
-  <script src="js/parking.js?v=5.34"></script>
-  <script src="js/app.js?v=5.34"></script>
+  <script src="js/utils.js?v=5.35"></script>
+  <script src="js/api.js?v=5.35"></script>
+  <script src="js/carreaux-europe.js?v=5.35"></script>
+  <script src="js/insee.js?v=5.35"></script>
+  <script src="js/map.js?v=5.35"></script>
+  <script src="js/export.js?v=5.35"></script>
+  <script src="js/route.js?v=5.35"></script>
+  <script src="js/camion.js?v=5.35"></script>
+  <script src="js/trains.js?v=5.35"></script>
+  <script src="js/parking.js?v=5.35"></script>
+  <script src="js/app.js?v=5.35"></script>
 </body>
 </html>
