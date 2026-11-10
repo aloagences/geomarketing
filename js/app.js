@@ -433,12 +433,25 @@ function camionLineHTML(st) {
   return `<div class="text-xs text-sky-700 mt-1">&#x1F69A; Véhicule garé : ${rue}${aPied}${passage}</div>`;
 }
 
+/** Voie inexploitable comme titre : vide, simple numéro, ou mention de remplissage des
+ *  bases (« Sans objet », « Non renseigné », « N/A »…) — l'annuaire et SIRENE en contiennent. */
+const RE_VOIE_VIDE = /^(sans objet|s\.?o\.?|non renseign[ée]e?s?|non communiqu[ée]e?|inconnue?|n\.?\s?[ac]\.?|nd|néant|aucune?|adresse non renseignée|-+|\?+)$/i;
+function voieUtilisable(voie) {
+  const v = (voie || '').trim();
+  return v.length >= 3 && !RE_VOIE_VIDE.test(v) && !/^\d+\s*(bis|ter)?$/i.test(v);
+}
+
 function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
-  const street = streetLabel(stop.address) || stop.address || '';
-  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+  const voie = streetLabel(stop.address) || stop.address || '';
+  // Pas de voie exploitable : le premier lieu (le lieu d'ancrage) devient le titre du secteur.
+  const titreLieu = !voieUtilisable(voie) && stop.locationName;
+  const street = titreLieu ? stop.locationName : voie;
+  const city   = (stop.address?.split(',').slice(1).join(',').trim() || '')
+    .split(',').map(x => x.trim()).filter(x => voieUtilisable(x)).join(', ');
 
   // Repères visuels : lieu principal + commerces proches détectés dans OSM
-  const marks = [stop.locationName, ...(stop.landmarks || [])].filter(Boolean);
+  // (le lieu principal n'y est pas répété quand il sert déjà de titre)
+  const marks = [titreLieu ? null : stop.locationName, ...(stop.landmarks || [])].filter(Boolean);
   const marksHtml = marks.map(m => `<span class="font-medium text-gray-700">${sanitize(m)}</span>`).join('<span class="text-gray-300">·</span>');
 
   // Horaires d'ouverture du lieu d'ancrage : un commerce fermé, c'est un
@@ -533,8 +546,10 @@ const SM_TYPE_ICONS = {
 
 function renderSmStopHTML(stop) {
   const cfg = SM_TYPE_ICONS[stop.type] || { icon: 'map-pin', color: 'text-cyan-400' };
-  const street = streetLabel(stop.address) || stop.address || '';
-  const city   = stop.address?.split(',').slice(1).join(',').trim() || '';
+  const voie = streetLabel(stop.address) || stop.address || '';
+  const street = voieUtilisable(voie) ? voie : '';
+  const city   = (stop.address?.split(',').slice(1).join(',').trim() || '')
+    .split(',').map(x => x.trim()).filter(x => voieUtilisable(x)).join(', ');
   return `
     <div class="sm-stop-card flex items-center p-4 bg-white rounded-2xl border border-cyan-200 shadow-sm mb-3">
       <div class="w-16 font-extrabold text-xl text-cyan-700 tracking-tight flex-shrink-0">${sanitize(stop.time || '')}</div>
