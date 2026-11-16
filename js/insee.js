@@ -832,15 +832,17 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
   const lignes = {};
   const rendre = () => {
     const bloc = (role, titre, liste, vide) => `<p class="text-[10px] font-extrabold uppercase tracking-wider mb-0.5 mt-1 flex items-center gap-1.5" style="color:${COUL[role]}">`
-      + `${losange(COUL[role], 10)} ${titre}</p>` + (liste.length ? liste.map(r => `<p class="text-[11px] text-gray-700 leading-5">${sanitize(r.enseigne)} : `
-        + (r.enseigne + r.role in lignes ? `<b>${lignes[r.enseigne + r.role]}</b> magasin${lignes[r.enseigne + r.role] > 1 ? 's' : ''}` : '<span class="text-gray-400">recherche…</span>') + '</p>').join('')
+      + `${losange(COUL[role], 10)} ${titre}</p>` + (liste.length ? '<p class="text-[11px] text-gray-700 leading-5">' + liste.map(r => `${sanitize(r.enseigne).replace(/ /g, '\u00a0')}\u00a0`
+        + (r.enseigne + r.role in lignes ? `<b>${lignes[r.enseigne + r.role]}</b>` : '<span class="text-gray-400">…</span>')).join('<span class="text-gray-300"> · </span>') + '</p>'
         : `<p class="text-[11px] text-gray-500 leading-4">${vide}</p>`);
-    boite.innerHTML = bloc('meme', 'Même enseigne · zone à éviter', recherches.filter(r => r.role === 'meme'),
+    _boiteConcurrents().res.innerHTML = bloc('meme', 'Même enseigne · zone à éviter', recherches.filter(r => r.role === 'meme'),
         'Renseignez l\'enseigne du client pour voir ses autres magasins.')
       + bloc('concurrent', 'Concurrents', recherches.filter(r => r.role === 'concurrent'),
-        'Renseignez le champ « Concurrents » (ex. Lidl, Carrefour) pour les voir ici.');
+        'Tapez les enseignes ci-dessous puis « Rechercher sur la carte ».');
   };
   boite.classList.remove('hidden');
+  const champ = _boiteConcurrents().champ;
+  if (document.activeElement !== champ) champ.value = concurrents.join(', ');
   rendre();
   if (!recherches.length) return;
 
@@ -875,4 +877,45 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
     }
     rendre();
   }));
+}
+
+
+/** Enseignes proposées quand le champ est vide : les grandes surfaces alimentaires. */
+const CONCURRENTS_PAR_DEFAUT = ['Lidl', 'Leclerc', 'Intermarché', 'Carrefour', 'Super U', 'Auchan'];
+
+/**
+ * Encadré des concurrents : une zone de résultats et, dessous, un champ + bouton
+ * « Rechercher sur la carte » (créés une seule fois : la saisie n'est pas effacée par les
+ * mises à jour des résultats). Le champ est recopié dans « Concurrents » du formulaire.
+ */
+function _boiteConcurrents() {
+  const boite = _inseeEl('inseeConcurrents');
+  let res = boite.querySelector('[data-conc-res]');
+  if (!res) {
+    boite.innerHTML = `
+      <div data-conc-res></div>
+      <form data-conc-form class="mt-2 pt-2 border-t border-gray-200 flex items-center gap-1.5">
+        <input data-conc-champ type="text" placeholder="Lidl, Carrefour, Intermarché…"
+          class="flex-1 min-w-0 text-[11px] border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:border-orange-500" />
+        <button type="submit" class="text-[11px] font-bold bg-orange-600 hover:bg-orange-700 text-white rounded-md px-2.5 py-1 whitespace-nowrap">
+          Rechercher sur la carte</button>
+      </form>`;
+    res = boite.querySelector('[data-conc-res]');
+    const champ = boite.querySelector('[data-conc-champ]');
+    // Les clics et la saisie dans l'encadré ne doivent ni peindre des carreaux ni déplacer la carte.
+    if (typeof L !== 'undefined') { L.DomEvent.disableClickPropagation(boite); L.DomEvent.disableScrollPropagation(boite); }
+    boite.querySelector('[data-conc-form]').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const meme = ((document.getElementById('ownBrand')?.value || '').split(',')[0].trim()
+        || (document.getElementById('clientBrand')?.value || '').trim()).toLowerCase();
+      if (!champ.value.trim()) {
+        champ.value = CONCURRENTS_PAR_DEFAUT.filter(c => c.toLowerCase() !== meme).join(', ');
+      }
+      const form = document.getElementById('competitors');
+      if (form) form.value = champ.value.trim();
+      champ.blur();
+      if (_inseeOrigine) _afficherConcurrentsINSEE(_inseeOrigine, _inseeRayon);
+    });
+  }
+  return { res, champ: boite.querySelector('[data-conc-champ]') };
 }
