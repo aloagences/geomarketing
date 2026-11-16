@@ -1792,8 +1792,10 @@ async function fetchWeatherForecast(lat, lng, startDate, days) {
 /**
  * Magasins d'une enseigne autour d'un point, pour que chaque magasin garde sa zone :
  * un plan ALDI Dagneux ne doit pas aller tracter devant la porte d'ALDI Montluel.
- * OpenStreetMap (Overpass) et Nominatim sont interrogés EN PARALLÈLE — Overpass est
- * souvent saturé — et leurs résultats fusionnés (deux points à moins de 150 m = un magasin).
+ * Trois sources OpenStreetMap interrogées EN PARALLÈLE et fusionnées (deux points à moins de
+ * 150 m = un magasin) : Overpass (souvent saturé), Nominatim et Photon. Depuis le site en ligne,
+ * Overpass et Nominatim refusent parfois toute requête (« Failed to fetch ») : Photon, lui,
+ * répondait — sans lui le bouton « Rechercher sur la carte » rendait 0 partout.
  * @returns {Promise<{nom:string, adresse:string, lat:number, lng:number}[]>}
  */
 async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
@@ -1840,7 +1842,27 @@ async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
       }));
   })().catch(() => []);
 
-  const tous = [...await viaOverpass, ...await viaNominatim];
+  const viaPhoton = (async () => {
+    const dLat = Math.min(rayonKm, 40) / 111, dLng = Math.min(rayonKm, 40) / (111 * Math.cos(lat * Math.PI / 180));
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(marque)}&limit=50`
+      + `&bbox=${lng - dLng},${lat - dLat},${lng + dLng},${lat + dLat}&lat=${lat}&lon=${lng}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) return [];
+      const nb = new RegExp(motif, 'i');
+      return ((await r.json()).features || [])
+        .filter(f => nb.test(f.properties?.name || '') && ['shop', 'amenity'].includes(f.properties?.osm_key))
+        .map(f => ({
+          nom: f.properties.name,
+          adresse: [f.properties.housenumber, f.properties.street, f.properties.city].filter(Boolean).join(' '),
+          lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0],
+        }));
+    } finally { clearTimeout(t); }
+  })().catch(() => []);
+
+  const tous = [...await viaOverpass, ...await viaNominatim, ...await viaPhoton];
   const uniques = [];
   for (const m of tous) {
     if (!uniques.some(u => calculateDistance(u.lat, u.lng, m.lat, m.lng) < 0.15)) uniques.push(m);

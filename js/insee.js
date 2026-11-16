@@ -825,7 +825,7 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
   const meme = ((document.getElementById('ownBrand')?.value || '').split(',')[0].trim()
     || (document.getElementById('clientBrand')?.value || '').trim());
   const concurrents = (document.getElementById('competitors')?.value || '')
-    .split(',').map(x => x.trim()).filter(x => x.length >= 2 && x.toLowerCase() !== meme.toLowerCase()).slice(0, 6);
+    .split(',').map(x => x.trim()).filter(x => x.length >= 2 && x.toLowerCase() !== meme.toLowerCase()).slice(0, 15);
   const recherches = [...(meme.length >= 2 ? [{ enseigne: meme, role: 'meme' }] : []),
                       ...concurrents.map(e => ({ enseigne: e, role: 'concurrent' }))];
 
@@ -880,8 +880,37 @@ async function _afficherConcurrentsINSEE(origin, radiusKm) {
 }
 
 
-/** Enseignes proposées quand le champ est vide : les grandes surfaces alimentaires. */
-const CONCURRENTS_PAR_DEFAUT = ['Lidl', 'Leclerc', 'Intermarché', 'Carrefour', 'Super U', 'Auchan'];
+/** Repli sans IA : la grande distribution alimentaire au complet. */
+const CONCURRENTS_PAR_DEFAUT = ['Lidl', 'Leclerc', 'Intermarché', 'Carrefour', 'Carrefour Market', 'Super U', 'Hyper U',
+  'Auchan', 'Netto', 'Leader Price', 'Casino', 'Spar', 'Colruyt', 'Grand Frais', 'Biocoop'];
+
+/**
+ * Liste complète des concurrents du client, demandée au moteur IA choisi dans le formulaire
+ * (même type de commerce, même clientèle, enseignes réellement présentes en France).
+ * Sans clé IA ou en cas d'échec : la grande distribution alimentaire au complet.
+ */
+async function suggererConcurrentsIA(enseigne) {
+  const sansClient = (liste) => liste.filter(c => c.toLowerCase() !== (enseigne || '').toLowerCase());
+  if (!enseigne || typeof callActiveAI !== 'function' || typeof getKeys !== 'function') return { liste: sansClient(CONCURRENTS_PAR_DEFAUT), ia: false };
+  const ville = (_inseeOrigine?.display_name || '').split(',').slice(-2).join(',').trim();
+  const prompt = `Client : l'enseigne « ${enseigne} »${ville ? `, magasin situé ${ville}` : ''}.\n`
+    + `Liste TOUTES les enseignes concurrentes directes ayant des magasins physiques en France : même type de commerce, `
+    + `même clientèle, y compris les enseignes régionales et les formats de proximité. 8 à 15 enseignes, du plus `
+    + `concurrent au moins concurrent, avec le nom tel qu'il figure sur la façade (ex. « Carrefour Market », « Super U »). `
+    + `N'inclus pas « ${enseigne} ». Réponds en JSON : {"concurrents": ["…", "…"]}`;
+  try {
+    const brut = await callActiveAI(getKeys(), prompt, 'Tu es un expert du commerce de détail et du géomarketing en France.',
+      document.getElementById('modelSelect')?.value || 'gemini-2.5-pro');
+    let liste = JSON.parse(cleanJson(brut)).concurrents;
+    if (!Array.isArray(liste)) throw new Error('format');
+    liste = sansClient(liste.map(c => (typeof c === 'object' ? c.nom || c.name || '' : String(c))).map(c => c.trim()).filter(c => c.length >= 2));
+    if (!liste.length) throw new Error('vide');
+    return { liste: liste.slice(0, 15), ia: true };
+  } catch (e) {
+    console.warn('[Concurrents] suggestion IA impossible, liste par défaut', e?.message || e);
+    return { liste: sansClient(CONCURRENTS_PAR_DEFAUT), ia: false };
+  }
+}
 
 /**
  * Encadré des concurrents : une zone de résultats et, dessous, un champ + bouton
@@ -899,22 +928,38 @@ function _boiteConcurrents() {
           class="flex-1 min-w-0 text-[11px] border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:border-orange-500" />
         <button type="submit" class="text-[11px] font-bold bg-orange-600 hover:bg-orange-700 text-white rounded-md px-2.5 py-1 whitespace-nowrap">
           Rechercher sur la carte</button>
-      </form>`;
+      </form>
+      <div class="mt-1.5 flex items-center gap-2">
+        <button type="button" data-conc-ia class="text-[11px] font-bold text-violet-700 hover:text-violet-900 underline decoration-dotted">
+          &#x2728; Suggérer tous les concurrents (IA)</button>
+        <span data-conc-etat class="text-[10px] text-gray-400"></span>
+      </div>`;
     res = boite.querySelector('[data-conc-res]');
     const champ = boite.querySelector('[data-conc-champ]');
     // Les clics et la saisie dans l'encadré ne doivent ni peindre des carreaux ni déplacer la carte.
     if (typeof L !== 'undefined') { L.DomEvent.disableClickPropagation(boite); L.DomEvent.disableScrollPropagation(boite); }
-    boite.querySelector('[data-conc-form]').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const meme = ((document.getElementById('ownBrand')?.value || '').split(',')[0].trim()
-        || (document.getElementById('clientBrand')?.value || '').trim()).toLowerCase();
-      if (!champ.value.trim()) {
-        champ.value = CONCURRENTS_PAR_DEFAUT.filter(c => c.toLowerCase() !== meme).join(', ');
-      }
+    const etat = boite.querySelector('[data-conc-etat]');
+    const enseigneClient = () => (document.getElementById('clientBrand')?.value || '').trim()
+      || (document.getElementById('ownBrand')?.value || '').split(',')[0].trim();
+    const lancer = () => {
       const form = document.getElementById('competitors');
       if (form) form.value = champ.value.trim();
       champ.blur();
       if (_inseeOrigine) _afficherConcurrentsINSEE(_inseeOrigine, _inseeRayon);
+    };
+    const suggerer = async () => {
+      etat.textContent = 'Recherche des concurrents par l\'IA…';
+      const { liste, ia } = await suggererConcurrentsIA(enseigneClient());
+      champ.value = liste.join(', ');
+      etat.textContent = ia ? `${liste.length} concurrents proposés par l'IA` : 'Liste par défaut (IA indisponible : clé à renseigner)';
+      lancer();
+    };
+    boite.querySelector('[data-conc-ia]').addEventListener('click', suggerer);
+    boite.querySelector('[data-conc-form]').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!champ.value.trim()) return suggerer();   // champ vide : l'IA dresse la liste
+      etat.textContent = '';
+      lancer();
     });
   }
   return { res, champ: boite.querySelector('[data-conc-champ]') };
