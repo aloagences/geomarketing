@@ -1755,6 +1755,12 @@ async function handleGenerate() {
           smCityCoords = { lat, lng };
         }
       } catch { /* continuer sans */ }
+      // Ville non reconnue (champ vide → la « ville » est une adresse) : le street marketing se
+      // faisait sauter en silence. On se cale alors sur le point de départ.
+      if (!smCityCoords) {
+        smCityCoords = { lat: originObj.lat, lng: originObj.lng };
+        console.warn(`[SM] ville « ${smCityRaw} » non reconnue : street marketing centré sur le point de départ.`);
+      }
     }
 
     // --- Centres équestres (distribution de coupons, mardi ou jeudi) ---
@@ -2463,6 +2469,27 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         console.log(`[SM] ${smStreetBeats.length} secteurs de rue construits`);
       } catch (e) { console.warn('[SM] rues commerçantes indisponibles', e); }
 
+      // Secteurs de secours, sans OpenStreetMap : le cœur de ville (point BAN de la commune,
+      // en pratique le centre/la mairie) et la gare SNCF la plus proche (horaires intégrés).
+      // Sans eux, un jour d'OSM saturé ne laissait AUCUN secteur piéton et la section street
+      // marketing disparaissait du plan.
+      const smSecours = [{
+        locationName: `Cœur de ville de ${smCityRaw}`, address: `Centre-ville, ${smCityRaw}`,
+        type: 'square', source: 'CENTRE-VILLE (secours)', lat: smCityCoords.lat, lng: smCityCoords.lng, marketDays: [],
+      }];
+      try {
+        const base = typeof chargerGares === 'function' ? await chargerGares() : null;
+        let gare = null, dMin = SM_RADIUS_KM;
+        for (const g of (base?.gares || [])) {
+          const dg = distKm(smCityCoords.lat, smCityCoords.lng, g[2], g[3]);
+          if (dg < dMin) { dMin = dg; gare = g; }
+        }
+        if (gare) smSecours.push({
+          locationName: /^gare/i.test(gare[1]) ? gare[1] : `Gare de ${gare[1]}`, address: `Parvis de la gare, ${gare[1]}`,
+          type: 'transport', source: 'GARE SNCF (secours)', lat: gare[2], lng: gare[3], marketDays: [], isGare: true,
+        });
+      } catch { /* sans gare */ }
+
       for (let idx = 0; idx < data.dailyPlans.length; idx++) {
         const iso = datesISO[idx];
         if (!smDays.includes(iso)) continue;
@@ -2496,6 +2523,12 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
           const poi = smFill.shift();
           validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
         }
+        // Moins de 3 secteurs : on complète avec le cœur de ville et la gare.
+        for (const sec of smSecours) {
+          if (validSmStops.length >= 3) break;
+          if (!validSmStops.some(v => distKm(v.lat, v.lng, sec.lat, sec.lng) < 0.15)) validSmStops.push({ ...sec });
+        }
+        console.log(`[SM] ${day.day} : ${validSmStops.length} secteur(s) piéton(s) — ${validSmStops.map(v => v.locationName).join(' · ')}`);
 
         // Assigner des horaires répartis sur la journée (selon smTimes formulaire)
         if (validSmStops.length > 0) {
