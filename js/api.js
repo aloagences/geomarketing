@@ -1703,6 +1703,9 @@ function parsePOI(e, originLat, originLng) {
     isSuper: FLUX_MAJEUR.has(tags.shop) || tags.amenity === 'supermarket',
     isHub: tags.public_transport === 'station' || tags.railway === 'station',
     isGare: tags.railway === 'station' || tags.railway === 'halt',
+    // Pôle de transport pour le street marketing : gare, halte, tram, métro, gare routière
+    isPoleTransport: ['station', 'halt', 'tram_stop', 'subway_entrance'].includes(tags.railway)
+      || tags.amenity === 'bus_station' || tags.public_transport === 'station',
     distance: calculateDistance(originLat, originLng, clat, clng).toFixed(1),
     hours: openingHours,
     marketDays, // jours où le marché est ouvert (vide pour les non-marchés)

@@ -458,6 +458,8 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
   // trottoir vide. Le chauffeur voit tout de suite s'il arrive au bon moment.
   const horaires = horairesLisibles(stop.hours);
 
+  const appui = stop.appuiSM
+    ? `<div class="text-xs font-semibold text-cyan-700 mt-1">&#x1F465; Appui de l'équipe piétonne : ${sanitize(stop.appuiSM)} — le chauffeur reste à proximité (référent)</div>` : '';
   const conc = stop.concurrent;
   const concHtml = !conc ? '' : conc.vise
     ? `<div class="text-xs font-bold text-red-700 mt-1">&#x1F3AF; Abords du concurrent ${sanitize(conc.nom)}${conc.adresse ? ` — ${sanitize(conc.adresse)}` : ''}</div>`
@@ -488,6 +490,7 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
       </span>
     </div>
     ${trainsLineHTML(stop.trains)}
+    ${appui}
     ${concHtml}
     ${parkingLineHTML(stop.parking)}
     ${camionLineHTML(stop.stationnement)}`;
@@ -1876,7 +1879,7 @@ VÉHICULE: fourgon de ${vehiculePrompt.length} m × ${vehiculePrompt.width} m po
 ANTI-DOUBLON STRICT: un même lieu (ou deux lieux à moins de 100 m) ne figure JAMAIS deux fois dans la même journée. Un lieu peut revenir un AUTRE jour (gare, mairie) uniquement si la BASE OSM manque de lieux.
 COUVERTURE: le véhicule doit circuler sur TOUT le périmètre : chaque jour vise un secteur différent, avec des arrêts enchaînés dans l'ordre le plus court (pas d'allers-retours d'un bout à l'autre de la zone).
 COPIE EXACTE: Recopier name/address depuis la BASE OSM.
-${smActive ? `STREET MARKETING COUPLÉ: Les jours marqués [STREET MARKETING] le VÉHICULE doit concentrer TOUS ses arrêts dans un rayon de 3 km autour du centre de ${smCityRaw}. Ces jours-là, génère AUSSI un tableau "smStops" (4 à 6 arrêts piétons) avec des rues commerçantes, places, hubs de transport ou marchés de ${smCityRaw}. Les smStops ont le même format que stops mais type parmi : pedestrian|square|transport|market.` : ''}
+${smActive ? `STREET MARKETING COUPLÉ: Les jours marqués [STREET MARKETING] le VÉHICULE doit concentrer TOUS ses arrêts dans le centre de ${smCityRaw} et rester à proximité immédiate (400 m au plus) de l'équipe piétonne : le chauffeur est leur référent, il se déplace peu ce jour-là, seulement quand l'équipe change de secteur. Ces jours-là, génère AUSSI un tableau "smStops" (4 à 6 arrêts piétons) EXCLUSIVEMENT dans le centre-ville de ${smCityRaw} (rues piétonnes, places), aux pôles de transport (gares, tram, gares routières) et sur les marchés forains. INTERDIT en street marketing : centres commerciaux, galeries marchandes, retail parks, zones commerciales, hypermarchés et supermarchés — y compris pour le véhicule ces jours-là. Les smStops ont le même format que stops mais type parmi : pedestrian|square|transport|market.` : ''}
 JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> JJ/MM/YYYY","role":"VÉHICULE","stops":[{"time":"HH:MM","locationName":"Nom","address":"Adresse","type":"market|transport|shopping|school|competitor|sport|culture|park|medical|other","source":"OSM","lat":0,"lng":0}],"smStops":[]}],"attendance":[{"date":"JJ/MM/YYYY","startMatin":"HH:MM","endMatin":"HH:MM","startAprem":"HH:MM","endAprem":"HH:MM"}]}`;
 
     const prompt = `Plan pour ${officialBrand} depuis ${inputRefs.address.value}.\nHORAIRES PAR JOUR :\n${perDayTimesPrompt}\n${poiContext}`;
@@ -2395,6 +2398,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
     }
 
     // --- STREET MARKETING : contrainte véhicule + arrêts piétons ---
+    let smAppui = null;   // outils repris en fin de génération : le camion reste près des animateurs
     if (smActive && smCityCoords) {
       const SM_RADIUS_KM = 3;
       const distKm = (lat1, lng1, lat2, lng2) => {
@@ -2405,19 +2409,36 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       };
 
-      // POIs piétons : rues commerçantes, places, transport, marchés — proches de la ville SM
-      const smPOIs = filteredPOIs.filter(p =>
-        distKm(smCityCoords.lat, smCityCoords.lng, p.lat, p.lng) <= SM_RADIUS_KM &&
-        ['transport', 'market', 'shopping', 'culture', 'park'].includes(p.type)
-      );
+      // RÈGLE STREET MARKETING : exclusivement centre-ville, pôles de transport et marchés forains.
+      // Jamais dans un centre commercial, une galerie, un retail park, une zone commerciale ni
+      // devant un hyper/supermarché (interdit aux équipes piétonnes).
+      const SM_CENTRE_KM = 1.5;
+      const RE_CENTRE_COMMERCIAL = /centre[\s-]*commercial|\bc\.\s?c\.|\bcc\b|galerie|retail\s*park|parc\s*(commercial|d'activit)|zone\s*(commerciale|d'activit|industrielle)|\bz\.?a\.?[ci]?\.?\b|espace\s*commercial|hypermarch|\bhyper\b|supermarch|outlet|\bmall\b|shopping|\bdrive\b|\b(cora|géant|auchan|leclerc|carrefour|intermarch\w*|super\s*u|hyper\s*u|lidl|aldi|netto|leader\s*price)\b/i;
+      const estCentreCommercial = (p) => !!p && (p.isSuper || RE_CENTRE_COMMERCIAL.test(`${p.name || p.locationName || ''} ${p.address || ''}`));
+      const autoriseSM = (p) => {
+        if (!p?.lat || !p?.lng || estCentreCommercial(p)) return false;
+        const d = distKm(smCityCoords.lat, smCityCoords.lng, p.lat, p.lng);
+        if (d > SM_RADIUS_KM) return false;
+        if (p.type === 'market') return true;                                   // marchés forains
+        if (p.type === 'transport') return !!(p.isPoleTransport || p.isGare || p.isHub
+          || /gare|station|tram|métro|metro|pôle|pole d'échange|gare routière/i.test(p.name || ''));
+        return d <= SM_CENTRE_KM && ['shopping', 'pedestrian', 'square', 'culture'].includes(p.type); // cœur de ville
+      };
+
+      // POIs piétons : centre-ville, pôles de transport, marchés — proches de la ville SM
+      const smPOIs = filteredPOIs.filter(autoriseSM);
+      smAppui = { distKm, estCentreCommercial };
 
       // Rues commerçantes / piétonnes → secteurs « de telle rue à telle rue »
       const shortStreet = (addr) => (addr || '').split(',')[0].replace(/^\d+\s*/, '').trim();
       let smStreetBeats = [];
       try {
         setProgress('Analyse des rues commerçantes (street marketing)...', 55);
+        // Rues piétonnes du CENTRE-VILLE seulement (1,5 km) : une « rue piétonne » plus loin est
+        // souvent l'allée d'un centre commercial ou d'une zone d'activités.
         const smStreets = (await fetchCommercialStreets(smCityCoords.lat, smCityCoords.lng, SM_RADIUS_KM))
-          .filter(st => distKm(smCityCoords.lat, smCityCoords.lng, st.lat, st.lng) <= SM_RADIUS_KM)
+          .filter(st => distKm(smCityCoords.lat, smCityCoords.lng, st.lat, st.lng) <= SM_CENTRE_KM
+            && !RE_CENTRE_COMMERCIAL.test(st.name || ''))
           .slice(0, 8);
         for (const st of smStreets) {
           // Reverse-géocode des extrémités pour décrire « de X à Y »
@@ -2449,13 +2470,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
 
         // 1. Forcer les arrêts VÉHICULE à rester dans 3 km autour de smCityCoords
         if (day.stops?.length) {
-          const inRange = day.stops.filter(s => s.lat && s.lng && distKm(smCityCoords.lat, smCityCoords.lng, s.lat, s.lng) <= SM_RADIUS_KM);
+          // Arrêt valable un jour de street marketing : dans les 3 km ET hors centre commercial.
+          const valableSM = (s) => s.lat && s.lng && distKm(smCityCoords.lat, smCityCoords.lng, s.lat, s.lng) <= SM_RADIUS_KM
+            && !estCentreCommercial(s);
+          const inRange = day.stops.filter(valableSM);
           // Si l'IA a bien placé les arrêts, les garder ; sinon réassigner depuis POIs SM
           if (inRange.length < day.stops.length && smPOIs.length > 0) {
             const usedSm = new Set(inRange.map(s => s.locationName));
             let fill = smPOIs.filter(p => !usedSm.has(p.name));
             day.stops = day.stops.map(stop => {
-              if (stop.lat && stop.lng && distKm(smCityCoords.lat, smCityCoords.lng, stop.lat, stop.lng) <= SM_RADIUS_KM) return stop;
+              if (valableSM(stop)) return stop;
               const poi = fill.shift();
               if (!poi) return stop; // garder si pas de remplacement dispo
               return { ...poi, time: stop.time, source: 'OSM (SM zone)' };
@@ -2465,7 +2489,7 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
 
         // 2. Construire/enrichir smStops (arrêts piétons)
         //    Priorité aux secteurs de rue précis « de telle rue à telle rue »
-        const validSmStops = smStreetBeats.map(b => ({ ...b }));
+        const validSmStops = smStreetBeats.map(b => ({ ...b })).filter(b => !estCentreCommercial(b));
         const beatNames = new Set(smStreetBeats.map(b => b.locationName));
         const smFill = smPOIs.filter(p => !beatNames.has(p.name));
         while (validSmStops.length < 6 && smFill.length > 0) {
@@ -2832,6 +2856,44 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
       doublonsRemplaces += res.remplaces;
       doublonsRetires += res.retires;
     });
+
+    // --- STREET MARKETING : le camion reste près des animateurs ---
+    // Le jour du street marketing, le chauffeur est le référent de l'équipe piétonne : le camion
+    // se tient à 400 m au plus du secteur où travaille l'équipe à cette heure-là, et ne se
+    // déplace que lorsque l'équipe change de secteur. Il peut donc rester sur place : c'est voulu
+    // (cette passe vient APRÈS l'unicité, qui l'aurait sinon fait bouger). Jamais en centre commercial.
+    if (smAppui) {
+      const enMin = (t) => { const [h, m] = String(t || '').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+      data.dailyPlans.forEach((day, idx) => {
+        if (!smDays.includes(datesISO[idx]) || !day.smStops?.length || !day.stops?.length) return;
+        const equipe = day.smStops.filter(x => x.lat && x.lng).sort((a, b) => enMin(a.time) - enMin(b.time));
+        if (!equipe.length) return;
+        const equipeA = (t) => equipe.reduce((cur, x) => (enMin(x.time) <= enMin(t) ? x : cur), equipe[0]);
+        const pris = new Set();
+        let rapproches = 0;
+        for (const stop of [...day.stops].sort((a, b) => enMin(a.time) - enMin(b.time))) {
+          if (stop.type === 'equestrian') continue;
+          const eq = equipeA(stop.time);
+          const d = (p) => smAppui.distKm(eq.lat, eq.lng, p.lat, p.lng);
+          stop.appuiSM = eq.locationName;
+          if (stop.lat && stop.lng && d(stop) <= 0.4 && !smAppui.estCentreCommercial(stop)) { pris.add(stop.locationName); continue; }
+          const ancre = availablePOIs
+            .filter(p => p.lat && p.lng && d(p) <= 0.4 && !smAppui.estCentreCommercial(p) && !pris.has(p.name))
+            .sort((a, b) => d(a) - d(b))[0];
+          if (ancre) {
+            Object.assign(stop, lieuDe(ancre, 'APPUI ÉQUIPE PIÉTONNE'), { landmarks: undefined });
+          } else {
+            Object.assign(stop, {
+              locationName: `Point d'appui — ${eq.locationName}`, address: eq.address,
+              lat: eq.lat, lng: eq.lng, type: 'other', source: 'APPUI ÉQUIPE PIÉTONNE', gare: false, landmarks: undefined,
+            });
+          }
+          pris.add(stop.locationName);
+          rapproches++;
+        }
+        console.log(`[SM] ${day.day} : camion en appui de l'équipe piétonne, ${rapproches} arrêt(s) rapproché(s) à 400 m au plus.`);
+      });
+    }
 
     // --- ACCÈS VÉHICULE (API Valhalla) ---
     // Fourgon portant des affiches, 4 m de haut au total : chaque arrêt doit
