@@ -568,7 +568,7 @@ function renderSmStopHTML(stop) {
           <span class="font-extrabold text-cyan-900 text-base">${sanitize(street || stop.locationName)}</span>
         </div>
         <div class="text-sm text-cyan-600 mt-1 flex items-center flex-wrap gap-x-2">
-          <span class="font-medium">${sanitize(stop.locationName)}</span>
+          <span class="font-medium">${sanitize((street && street === stop.locationName) ? 'Espace public du centre-ville' : stop.locationName)}</span>
           ${city ? `<span class="text-cyan-400">${sanitize(city)}</span>` : ''}
         </div>
       </div>
@@ -1755,7 +1755,7 @@ async function handleGenerate() {
         const d = await r.json();
         if (d.features?.[0]) {
           const [lng, lat] = d.features[0].geometry.coordinates;
-          smCityCoords = { lat, lng };
+          smCityCoords = { lat, lng, citycode: d.features[0].properties?.citycode || '' };
         }
       } catch { /* continuer sans */ }
       // Ville non reconnue (champ vide → la « ville » est une adresse) : le street marketing se
@@ -2496,6 +2496,20 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         });
       } catch { /* sans gare */ }
 
+      // Places, esplanades, quais, cours de la commune d'après la Base Adresse Nationale :
+      // source fiable quand OpenStreetMap ne renvoie rien (Blaye n'avait que « Cœur de ville »).
+      let smEspacesBAN = [];
+      try {
+        smEspacesBAN = (await fetchEspacesPublicsBAN(smCityCoords.lat, smCityCoords.lng, smCityCoords.citycode, SM_CENTRE_KM))
+          .filter(e => !RE_CENTRE_COMMERCIAL.test(e.name))
+          .map(e => ({
+            locationName: e.name, address: `${e.name}, ${e.ville || smCityRaw}`,
+            type: 'square', source: 'ESPACE PUBLIC (Base Adresse Nationale)',
+            lat: e.lat, lng: e.lng, marketDays: [], isEspacePublic: true,
+          }));
+        console.log(`[SM] ${smEspacesBAN.length} espace(s) public(s) BAN : ${smEspacesBAN.map(e => e.locationName).join(' · ')}`);
+      } catch (e) { console.warn('[SM] espaces publics BAN indisponibles', e); }
+
       for (let idx = 0; idx < data.dailyPlans.length; idx++) {
         const iso = datesISO[idx];
         if (!smDays.includes(iso)) continue;
@@ -2530,6 +2544,12 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         while (validSmStops.length < 6 && smFill.length > 0) {
           const poi = smFill.shift();
           validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
+        }
+        // Puis les places, quais, cours de la Base Adresse Nationale (hors abords des concurrents).
+        const loinDe = (x) => !validSmStops.some(v => v.lat && distKm(v.lat, v.lng, x.lat, x.lng) < 0.15);
+        for (const e of smEspacesBAN) {
+          if (validSmStops.length >= 6) break;
+          if (!devantConcurrent(e) && loinDe(e)) validSmStops.push({ ...e });
         }
         // Moins de 3 secteurs : on complète avec le cœur de ville et la gare.
         for (const sec of smSecours) {

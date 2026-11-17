@@ -1430,6 +1430,45 @@ async function fetchEquestrianCenters(lat, lng, radiusKm) {
   return centers.slice(0, 10);
 }
 
+/**
+ * Espaces publics d'une commune pour le street marketing, d'après la Base Adresse
+ * Nationale (fiable, sans quota) : places, esplanades, parvis, quais, allées, cours.
+ * Sert quand OpenStreetMap est saturé ou pauvre : sans cela, une ville comme Blaye
+ * n'avait que « Cœur de ville » comme secteur piéton.
+ * Rang : 0 = place/parvis/esplanade, 1 = quai/allées/promenade, 2 = cours.
+ */
+async function fetchEspacesPublicsBAN(lat, lng, citycode, rayonKm = 1.5) {
+  const familles = [
+    { q: 'place', re: /^place\b/i, rang: 0 },
+    { q: 'esplanade', re: /^esplanade\b/i, rang: 0 },
+    { q: 'parvis', re: /^parvis\b/i, rang: 0 },
+    { q: 'quai', re: /^quai\b/i, rang: 1 },
+    { q: 'allées', re: /^all[ée]es?\b/i, rang: 1 },
+    { q: 'promenade', re: /^promenade\b/i, rang: 1 },
+    { q: 'cours', re: /^cours\b/i, rang: 2 },
+  ];
+  const zone = citycode ? `&citycode=${citycode}` : `&lat=${lat}&lon=${lng}`;
+  const listes = await Promise.all(familles.map(async (f) => {
+    try {
+      const r = await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(f.q)}&type=street${zone}&limit=20`);
+      if (!r.ok) return [];
+      const d = await r.json();
+      return (d.features || []).map(ft => {
+        const nom = ft.properties?.name || '';
+        if (!f.re.test(nom)) return null;
+        const [flng, flat] = ft.geometry.coordinates;
+        const km = calculateDistance(lat, lng, flat, flng);
+        if (km > rayonKm) return null;
+        return { name: nom, lat: flat, lng: flng, km, rang: f.rang, ville: ft.properties?.city || '' };
+      }).filter(Boolean);
+    } catch { return []; }
+  }));
+  const vus = new Set();
+  return listes.flat()
+    .filter(e => { const k = e.name.toLowerCase(); if (vus.has(k)) return false; vus.add(k); return true; })
+    .sort((a, b) => a.rang - b.rang || a.km - b.km);
+}
+
 // Rues commerçantes / piétonnes pour le street marketing : récupère la
 // géométrie afin de décrire des secteurs « de telle rue à telle rue ».
 async function fetchCommercialStreets(lat, lng, radiusKm) {
