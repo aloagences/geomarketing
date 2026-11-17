@@ -492,10 +492,26 @@ async function geocodeAddressBAN(addressStr) {
   return geocodeAddressOSM(addressStr);
 }
 
+// --- Nominatim : une requête par seconde au plus, pour toute l'appli ---
+// Règle d'usage de Nominatim. Le secours « lieux » en envoyait 10 à 0,2 s d'intervalle et
+// les recherches de magasins s'y ajoutaient : Nominatim répondait 429 (trop de requêtes) et
+// bloquait la connexion de l'agence — d'où des recherches de concurrents à 0 partout.
+let _nominatimFile = Promise.resolve();
+let _nominatimDernier = 0;
+function nominatimFetch(url, options) {
+  const tour = _nominatimFile.then(async () => {
+    const attente = _nominatimDernier + 1100 - Date.now();
+    if (attente > 0) await new Promise(r => setTimeout(r, attente));
+    _nominatimDernier = Date.now();
+  });
+  _nominatimFile = tour.catch(() => {});
+  return tour.then(() => fetch(url, options));
+}
+
 async function geocodeAddressOSM(addressStr) {
   const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressStr)}&limit=1&addressdetails=1`;
   try {
-    const res = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
+    const res = await nominatimFetch(url, { headers: { 'Accept-Language': 'fr' } });
     const data = await res.json();
     if (data?.length > 0) {
       return {
@@ -956,7 +972,8 @@ async function fetchPOIsNominatim(lat, lng, radiusKm) {
   for (const type of types) {
     try {
       const url = `https://nominatim.openstreetmap.org/search?format=json&amenity=${type}&viewbox=${viewbox}&bounded=1&limit=5&addressdetails=1`;
-      const res = await fetch(url, { headers: { 'User-Agent': 'ALO-Geomarketing/1.7' } });
+      const res = await nominatimFetch(url);
+      if (res.status === 429) break;          // bloqué : inutile d'insister
       if (!res.ok) continue;
       const items = await res.json();
       for (const item of items) {
@@ -983,7 +1000,6 @@ async function fetchPOIsNominatim(lat, lng, radiusKm) {
           hours: 'Non spécifié',
         });
       }
-      await new Promise(r => setTimeout(r, 200)); // respecter rate limit Nominatim
     } catch { /* continue */ }
   }
   return results;
@@ -1801,6 +1817,13 @@ async function fetchWeatherForecast(lat, lng, startDate, days) {
 async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
   const marque = String(enseigne || '').trim();
   if (marque.length < 2) return [];
+  // Mémoire de 7 jours dans le navigateur : rouvrir la carte ou relancer une génération ne
+  // refait pas les mêmes requêtes (Overpass et Nominatim limitent le nombre d'appels).
+  const cleMemoire = `alo.magasins.${marque.toLowerCase()}|${lat.toFixed(2)}|${lng.toFixed(2)}|${Math.round(rayonKm)}`;
+  try {
+    const m = JSON.parse(localStorage.getItem(cleMemoire) || 'null');
+    if (m && Date.now() - m.t < 7 * 86400000 && Array.isArray(m.magasins)) return m.magasins;
+  } catch { /* mémoire indisponible */ }
   const motif = marque.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
   const rM = Math.round(Math.min(rayonKm, 40) * 1000);
 
@@ -1830,7 +1853,7 @@ async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
     const dLat = Math.min(rayonKm, 40) / 111, dLng = Math.min(rayonKm, 40) / (111 * Math.cos(lat * Math.PI / 180));
     const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(marque)}`
       + `&viewbox=${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}&bounded=1&limit=50&addressdetails=1`;
-    const r = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
+    const r = await nominatimFetch(url, { headers: { 'Accept-Language': 'fr' } });
     if (!r.ok) return [];
     const nb = new RegExp(motif, 'i');
     return (await r.json())
@@ -1866,6 +1889,9 @@ async function fetchMagasinsEnseigne(enseigne, lat, lng, rayonKm) {
   const uniques = [];
   for (const m of tous) {
     if (!uniques.some(u => calculateDistance(u.lat, u.lng, m.lat, m.lng) < 0.15)) uniques.push(m);
+  }
+  if (uniques.length) {
+    try { localStorage.setItem(cleMemoire, JSON.stringify({ t: Date.now(), magasins: uniques })); } catch { /* plein ou bloqué */ }
   }
   return uniques;
 }

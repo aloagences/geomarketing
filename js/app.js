@@ -458,6 +458,11 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
   // trottoir vide. Le chauffeur voit tout de suite s'il arrive au bon moment.
   const horaires = horairesLisibles(stop.hours);
 
+  const conc = stop.concurrent;
+  const concHtml = !conc ? '' : conc.vise
+    ? `<div class="text-xs font-bold text-red-700 mt-1">&#x1F3AF; Abords du concurrent ${sanitize(conc.nom)}${conc.adresse ? ` — ${sanitize(conc.adresse)}` : ''}</div>`
+    : `<div class="text-xs text-red-700 mt-1">&#x1F3AF; Concurrent à proximité : ${sanitize(conc.nom)} (${conc.m} m)</div>`;
+
   return `
     <div class="flex items-center flex-wrap gap-2">
       ${getTypeIconHTML(stop.type)}
@@ -483,6 +488,7 @@ function renderStopBodyHTML(stop, stopId, distBadge, srcLabel) {
       </span>
     </div>
     ${trainsLineHTML(stop.trains)}
+    ${concHtml}
     ${parkingLineHTML(stop.parking)}
     ${camionLineHTML(stop.stationnement)}`;
 }
@@ -1373,6 +1379,28 @@ async function handleGenerate() {
       }
       preVerifiedCompetitors = preVerifiedCompetitors.filter((v, i, a) => a.findIndex(v2 => v2.name === v.name) === i);
 
+      // Magasins des concurrents, cherchés comme sur la carte du potentiel (même cache) : le pool
+      // OpenStreetMap n'en contient souvent aucun, et le tracé ne pouvait donc pas les viser.
+      const enseignesConc = userCompetitors.split(',').map(c => c.trim()).filter(c => c.length >= 2).slice(0, 15);
+      if (typeof magasinsDesEnseignes === 'function' && enseignesConc.length) {
+        setProgress(`Magasins concurrents (${enseignesConc.length} enseignes)…`, 51);
+        const magasins = await magasinsDesEnseignes(enseignesConc, originObj, radius);
+        let ajoutes = 0;
+        for (const m of magasins) {
+          const dist = calculateDistance(originObj.lat, originObj.lng, m.lat, m.lng);
+          if (dist > radius || isBlocked(m.nom, m.adresse || '', m.lat, m.lng)) continue;
+          if (preVerifiedCompetitors.some(c => calculateDistance(c.lat, c.lng, m.lat, m.lng) < 0.15)) continue;
+          // Nom unique par magasin (l'unicité des arrêts se fait sur le nom) : « Lidl (Avenue de Paris Coutras) »
+          const name = `${m.nom} (${m.adresse || `${dist.toFixed(1).replace('.', ',')} km`})`;
+          preVerifiedCompetitors.push({
+            name, lat: m.lat, lng: m.lng, type: 'competitor', address: m.adresse || '',
+            enseigne: m.enseigne, distance: dist.toFixed(1), source: 'CONCURRENT', reliability: 8, publicScore: 8,
+          });
+          ajoutes++;
+        }
+        console.log(`[Concurrents] ${ajoutes} magasin(s) concurrent(s) ajoutés au tracé (${enseignesConc.join(', ')}).`);
+      }
+
       if (preVerifiedCompetitors.length === 0) {
         for (const comp of compList) {
           const sData = await verifyCompetitorSIREN(comp, originObj.lat, originObj.lng, radius);
@@ -1651,7 +1679,11 @@ async function handleGenerate() {
       : 'BASE OSM VIDE.\n';
 
     if (preVerifiedCompetitors.length > 0) {
-      poiContext += `\nBASE CONCURRENTS CERTIFIÉS :\n${JSON.stringify(preVerifiedCompetitors)}\n`;
+      // Version allégée (30 au plus, les plus proches) : la liste complète des magasins
+      // concurrents gonflerait le prompt sans rien apporter de plus à l'IA.
+      const baseConc = [...preVerifiedCompetitors].sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance)).slice(0, 30)
+        .map(c => ({ name: c.name, address: c.address, lat: c.lat, lng: c.lng, type: 'competitor' }));
+      poiContext += `\nBASE CONCURRENTS CERTIFIÉS :\n${JSON.stringify(baseConc)}\n`;
     }
 
     // Jours de marché vérifiés via OSM opening_hours
@@ -1665,7 +1697,7 @@ async function handleGenerate() {
     }
 
     let competitorInstruction = preVerifiedCompetitors.length > 0
-      ? 'CONCURRENTS: Inclus au moins 1-2 par jour tirés de la BASE CONCURRENTS CERTIFIÉS.'
+      ? 'CONCURRENTS: PRIORITÉ CLIENT. Chaque jour, passe aux abords d\'au moins 1 à 2 magasins de la BASE CONCURRENTS CERTIFIÉS (type "competitor", nom exact), en variant les concurrents d\'un jour à l\'autre.'
       : 'CONCURRENTS: Aucun trouvé dans le périmètre.';
 
     // Secteurs INSEE : on donne à l'IA la population réelle de chaque zone
@@ -2329,6 +2361,39 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
       if (deplaces || restes) console.log(`[Enseigne] ${deplaces} arrêt(s) ramené(s) dans la zone du client, ${restes} sans remplaçant.`);
     }
 
+    // --- CONCURRENTS : au moins un passage par jour aux abords d'un concurrent ---
+    // Viser le concurrent est une demande forte des clients. L'IA l'oublie souvent : chaque
+    // jour qui n'en a aucun reçoit le concurrent le moins visité (ceux des carreaux sélectionnés
+    // d'abord), à la place de l'arrêt libre le plus proche de lui (ni école, ni marché, ni gare).
+    const concurrentsCibles = preVerifiedCompetitors.filter(c => c.lat && c.lng && !magasinVoisinPlusProche(c.lat, c.lng));
+    if (concurrentsCibles.length) {
+      const passages = new Map();
+      data.dailyPlans.forEach(d => (d.stops || []).forEach(s => {
+        if (s.type === 'competitor') passages.set(s.locationName, (passages.get(s.locationName) || 0) + 1);
+      }));
+      const dansSel = (c) => (!inseeSelection?.carreaux?.length || dansSelectionINSEE(c.lat, c.lng)) ? 1 : 0;
+      let ajouts = 0;
+      for (const day of data.dailyPlans) {
+        const stops = day.stops || [];
+        if (!stops.length || stops.some(s => s.type === 'competitor')) continue;
+        const pris = new Set(stops.map(s => s.locationName));
+        const c = concurrentsCibles.filter(x => !pris.has(x.name))
+          .sort((a, b) => (dansSel(b) - dansSel(a)) || ((passages.get(a.name) || 0) - (passages.get(b.name) || 0)))[0];
+        if (!c) continue;
+        const libres = stops.filter(s => s.lat && s.lng && !s.gare && s.type !== 'equestrian' && s.type !== 'market'
+          && !estLieuEcole(s.locationName, s.type));
+        if (!libres.length) continue;
+        const proche = (s) => calculateDistance(s.lat, s.lng, c.lat, c.lng);
+        const cible = libres.reduce((b, s) => (proche(s) < proche(b) ? s : b));
+        console.log(`[Concurrents] ${day.day} : « ${cible.locationName} » → abords de « ${c.name} ».`);
+        Object.assign(cible, lieuDe(c, 'CONCURRENT'));
+        markUsed(c.name);
+        passages.set(c.name, (passages.get(c.name) || 0) + 1);
+        ajouts++;
+      }
+      console.log(`[Concurrents] ${concurrentsCibles.length} concurrent(s) dans la zone, ${ajouts} passage(s) ajouté(s) aux jours qui n'en avaient pas.`);
+    }
+
     // --- STREET MARKETING : contrainte véhicule + arrêts piétons ---
     if (smActive && smCityCoords) {
       const SM_RADIUS_KM = 3;
@@ -2819,6 +2884,16 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
     for (const day of data.dailyPlans) {
       for (const stop of (day.stops || [])) {
         stop.landmarks = findLandmarks(stop, landmarkPool);
+        // Indication chauffeur : concurrent visé par l'arrêt, ou concurrent à moins de 500 m.
+        const visé = stop.type === 'competitor' ? preVerifiedCompetitors.find(c => c.name === stop.locationName) : null;
+        stop.concurrent = visé ? { nom: visé.enseigne || visé.name, adresse: visé.address || stop.address, vise: true } : null;
+        if (!stop.concurrent && stop.lat && stop.lng) {
+          const proche = preVerifiedCompetitors
+            .map(c => ({ c, m: calculateDistance(stop.lat, stop.lng, c.lat, c.lng) * 1000 }))
+            .filter(x => x.m <= 500 && x.c.name !== stop.locationName)
+            .sort((a, b) => a.m - b.m)[0];
+          if (proche) stop.concurrent = { nom: proche.c.enseigne || proche.c.name, adresse: proche.c.address, m: Math.round(proche.m / 10) * 10, vise: false };
+        }
       }
     }
 

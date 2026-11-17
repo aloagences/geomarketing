@@ -964,3 +964,25 @@ function _boiteConcurrents() {
   }
   return { res, champ: boite.querySelector('[data-conc-champ]') };
 }
+
+
+/**
+ * Magasins de plusieurs enseignes autour d'un point, avec le même cache que la carte du potentiel :
+ * les concurrents vus sur la carte sont ceux que vise le tracé, sans relancer la recherche.
+ * @returns {Promise<{nom, adresse, lat, lng, enseigne}[]>}
+ */
+async function magasinsDesEnseignes(enseignes, origin, radiusKm) {
+  const rayon = radiusKm * 1.2;
+  const res = [];
+  await Promise.all(enseignes.map(async (enseigne, i) => {
+    const cle = `${enseigne.toLowerCase()}|${origin.lat.toFixed(3)}|${origin.lng.toFixed(3)}|${rayon}`;
+    let magasins = _cacheConcurrents.get(cle);
+    if (!magasins) {
+      await new Promise(r => setTimeout(r, i * 1100));     // Nominatim refuse les rafales
+      magasins = await fetchMagasinsEnseigne(enseigne, origin.lat, origin.lng, rayon).catch(() => []);
+      if (magasins.length) _cacheConcurrents.set(cle, magasins);
+    }
+    magasins.forEach(m => res.push({ ...m, enseigne }));
+  }));
+  return res;
+}
