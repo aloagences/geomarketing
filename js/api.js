@@ -1703,6 +1703,9 @@ function parsePOI(e, originLat, originLng) {
     isSuper: FLUX_MAJEUR.has(tags.shop) || tags.amenity === 'supermarket',
     isHub: tags.public_transport === 'station' || tags.railway === 'station',
     isGare: tags.railway === 'station' || tags.railway === 'halt',
+    // Espace public pour l'équipe piétonne : place, rue piétonne, parvis de mairie — jamais un commerce
+    isEspacePublic: !tags.shop && (tags.place === 'square' || tags.highway === 'pedestrian'
+      || tags.amenity === 'townhall' || tags.amenity === 'marketplace'),
     // Pôle de transport pour le street marketing : gare, halte, tram, métro, gare routière
     isPoleTransport: ['station', 'halt', 'tram_stop', 'subway_entrance'].includes(tags.railway)
       || tags.amenity === 'bus_station' || tags.public_transport === 'station',

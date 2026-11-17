@@ -1735,6 +1735,9 @@ async function handleGenerate() {
     const smCityRaw = (inputRefs.smCity?.value || '').trim() || targetCity;
     const smTeamSize = parseInt(inputRefs.smTeamSize?.value || '2');
     const smActive = smDays.length > 0;
+    if (!smActive && (inputRefs.smCity?.value || '').trim()) {
+      showMessage(`Street marketing : la ville « ${inputRefs.smCity.value.trim()} » est renseignée mais aucun jour n'est coché — le plan est généré sans street marketing.`, 'warn');
+    }
     const smTimes = {
       hasMorning:   inputRefs.smHasMorning?.checked !== false,
       mornStart:    inputRefs.smMornStart?.value || '10:00',
@@ -2428,7 +2431,10 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         if (p.type === 'market') return true;                                   // marchés forains
         if (p.type === 'transport') return !!(p.isPoleTransport || p.isGare || p.isHub
           || /gare|station|tram|métro|metro|pôle|pole d'échange|gare routière/i.test(p.name || ''));
-        return d <= SM_CENTRE_KM && ['shopping', 'pedestrian', 'square', 'culture'].includes(p.type); // cœur de ville
+        // Cœur de ville : uniquement des ESPACES PUBLICS (place, rue piétonne, parvis de mairie).
+        // Jamais devant un commerce : des flyers de réduction devant un magasin, a fortiori un
+        // concurrent (GIFI…), c'est de la provocation. Le camion, lui, peut y stationner quelques minutes.
+        return d <= SM_CENTRE_KM && !!p.isEspacePublic && p.type !== 'competitor';
       };
 
       // POIs piétons : centre-ville, pôles de transport, marchés — proches de la ville SM
@@ -2517,8 +2523,10 @@ JSON FORMAT: {"analysis":"...","dailyPlans":[{"day":"<jour de la semaine réel> 
         // 2. Construire/enrichir smStops (arrêts piétons)
         //    Priorité aux secteurs de rue précis « de telle rue à telle rue »
         const validSmStops = smStreetBeats.map(b => ({ ...b })).filter(b => !estCentreCommercial(b));
+        // Équipe piétonne : jamais à moins de 60 m d'un magasin concurrent.
+        const devantConcurrent = (x) => preVerifiedCompetitors.some(c => c.lat && distKm(x.lat, x.lng, c.lat, c.lng) < 0.06);
         const beatNames = new Set(smStreetBeats.map(b => b.locationName));
-        const smFill = smPOIs.filter(p => !beatNames.has(p.name));
+        const smFill = smPOIs.filter(p => !beatNames.has(p.name) && !devantConcurrent(p));
         while (validSmStops.length < 6 && smFill.length > 0) {
           const poi = smFill.shift();
           validSmStops.push({ ...poi, source: 'OSM (SM piéton)' });
